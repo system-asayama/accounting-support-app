@@ -1,0 +1,34 @@
+{% extends "base.html" %}
+{% block title %}事業所の選択（MF）{% endblock %}
+{% block content %}
+<div class="card">
+  <h1>事業所の選択（マネーフォワード）</h1>
+  <p class="muted">データを取得する事業所を選んでください（{{ offices | length }} 件）。</p>
+
+  <div class="table-wrap">
+    <table>
+      <thead><tr><th>ID</th><th>事業所名</th><th></th></tr></thead>
+      <tbody>
+        {% for o in offices %}
+        {% set oid = o.id or o.office_id or o.get('identification_code') %}
+        {% set oname = o.name or o.office_name or o.company_name or '(名称未設定)' %}
+        <tr>
+          <td class="muted">{{ oid }}</td>
+          <td class="wrap">
+            {{ oname }}
+            {% if conn.office_id == (oid | string) %}<span class="badge success">選択中</span>{% endif %}
+          </td>
+          <td>
+            <form method="post" action="{{ url_for('mf_select_office') }}">
+              <input type="hidden" name="office_id" value="{{ oid }}">
+              <input type="hidden" name="office_name" value="{{ oname }}">
+              <button class="small" type="submit">選択</button>
+            </form>
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% endblock %}

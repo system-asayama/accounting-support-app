@@ -14,6 +14,11 @@ services:
       FREEE_CLIENT_ID: ${FREEE_CLIENT_ID:-}
       FREEE_CLIENT_SECRET: ${FREEE_CLIENT_SECRET:-}
       FREEE_REDIRECT_URI: ${FREEE_REDIRECT_URI:-}
+      MF_CLIENT_ID: ${MF_CLIENT_ID:-}
+      MF_CLIENT_SECRET: ${MF_CLIENT_SECRET:-}
+      MF_REDIRECT_URI: ${MF_REDIRECT_URI:-}
+      MF_SCOPE: ${MF_SCOPE:-}
+      MF_API_BASE: ${MF_API_BASE:-}
     depends_on:
       - db
     restart: unless-stopped

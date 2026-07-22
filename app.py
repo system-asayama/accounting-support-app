@@ -21,6 +21,7 @@ from flask import (
 )
 
 import freee_client
+import mf_client
 from broadcast_service import BroadcastError, run_broadcast
 from prompts import AI_APPS, CHECK_PROMPTS
 from models import (
@@ -31,6 +32,8 @@ from models import (
     ROLE_ADMIN,
     ROLE_USER,
     ROLES,
+    SOURCE_FREEE,
+    SOURCE_MF,
     Agent,
     Broadcast,
     BroadcastResult,
@@ -38,8 +41,10 @@ from models import (
     FreeeConnection,
     ImportedDeal,
     ImportedReceipt,
+    MFConnection,
     User,
     db,
+    make_scope_key,
 )
 
 
@@ -88,6 +93,18 @@ def _ensure_schema() -> None:
         ("agents", "provider", "ALTER TABLE agents ADD COLUMN provider VARCHAR(20) DEFAULT 'anthropic'"),
         ("broadcast_results", "provider", "ALTER TABLE broadcast_results ADD COLUMN provider VARCHAR(20)"),
     ]
+    # 会計ソース対応（freee / MF）で後付けした列
+    for tbl in ("imported_deals", "imported_receipts", "deal_analyses"):
+        additions.append((tbl, "source", f"ALTER TABLE {tbl} ADD COLUMN source VARCHAR(20) DEFAULT 'freee'"))
+        additions.append((tbl, "scope_key", f"ALTER TABLE {tbl} ADD COLUMN scope_key VARCHAR(120)"))
+        additions.append((tbl, "office_id", f"ALTER TABLE {tbl} ADD COLUMN office_id VARCHAR(80)"))
+    additions.append(
+        ("imported_deals", "receipt_ids_json", "ALTER TABLE imported_deals ADD COLUMN receipt_ids_json TEXT DEFAULT '[]'")
+    )
+    additions.append(
+        ("deal_analyses", "check_type", "ALTER TABLE deal_analyses ADD COLUMN check_type VARCHAR(40)")
+    )
+
     for table, column, ddl in additions:
         if table not in existing_tables:
             continue
@@ -95,6 +112,21 @@ def _ensure_schema() -> None:
         if column not in columns:
             with db.engine.begin() as conn:
                 conn.execute(text(ddl))
+
+    # 既存の freee 行に scope_key を後付けで埋める（列追加後の状態で再取得する）
+    fresh = inspect(db.engine)
+    for tbl in ("imported_deals", "imported_receipts", "deal_analyses"):
+        if tbl not in existing_tables:
+            continue
+        cols = {c["name"] for c in fresh.get_columns(tbl)}
+        if {"scope_key", "company_id"} <= cols:
+            with db.engine.begin() as conn:
+                conn.execute(
+                    text(
+                        f"UPDATE {tbl} SET scope_key = 'freee:' || company_id "
+                        f"WHERE scope_key IS NULL AND company_id IS NOT NULL"
+                    )
+                )
 
 
 def _seed_admin() -> None:
@@ -749,6 +781,8 @@ def _register_routes(app: Flask) -> None:
                 created += 1
             else:
                 updated += 1
+            existing.source = SOURCE_FREEE
+            existing.scope_key = make_scope_key(SOURCE_FREEE, company_id=conn.company_id)
             existing.issue_date = d.get("issue_date")
             existing.deal_type = d.get("type")
             existing.amount = d.get("amount")
@@ -779,6 +813,10 @@ def _register_routes(app: Flask) -> None:
                         )
                         db.session.add(ir)
                         r_created += 1
+                    ir.source = SOURCE_FREEE
+                    ir.scope_key = make_scope_key(
+                        SOURCE_FREEE, company_id=conn.company_id
+                    )
                     ir.status = r.get("status")
                     ir.description = (r.get("description") or "")[:255] or None
                     ir.document_type = r.get("document_type")
@@ -811,9 +849,19 @@ def _register_routes(app: Flask) -> None:
     def analyses():
         """取り込んだ取引と、各AIが書き込んだ解析結果を並べて比較する。"""
         conn = FreeeConnection.get()
-        query = ImportedDeal.query
+        mf = MFConnection.get()
+        # 有効な接続のスコープに絞り込む（freee を優先、無ければ MF）
+        scope_key, scope_name = None, None
         if conn.company_id:
-            query = query.filter_by(company_id=conn.company_id)
+            scope_key = make_scope_key(SOURCE_FREEE, company_id=conn.company_id)
+            scope_name = conn.company_name
+        elif mf.office_id:
+            scope_key = make_scope_key(SOURCE_MF, office_id=mf.office_id)
+            scope_name = mf.office_name
+
+        query = ImportedDeal.query
+        if scope_key:
+            query = query.filter_by(scope_key=scope_key)
         deals = query.order_by(ImportedDeal.issue_date.desc()).limit(200).all()
 
         # 出現したAI名を集める（列見出し用）
@@ -825,7 +873,180 @@ def _register_routes(app: Flask) -> None:
             .all()
         ]
         return render_template(
-            "analyses.html", conn=conn, deals=deals, ai_names=ai_names
+            "analyses.html", scope_name=scope_name, deals=deals, ai_names=ai_names
+        )
+
+    # --- マネーフォワード クラウド会計 連携 --------------------------------
+    @app.route("/mf")
+    @login_required
+    def mf_status():
+        conn = MFConnection.get()
+        return render_template(
+            "mf_status.html",
+            conn=conn,
+            configured=mf_client.is_configured(),
+            redirect_uri=mf_client.get_config()["redirect_uri"],
+            oob=mf_client.OOB_REDIRECT,
+        )
+
+    @app.route("/mf/oauth/start")
+    @login_required
+    def mf_oauth_start():
+        try:
+            return redirect(mf_client.authorize_url())
+        except mf_client.MFError as exc:
+            flash(str(exc), "error")
+            return redirect(url_for("mf_status"))
+
+    @app.route("/mf/oauth/callback")
+    @login_required
+    def mf_oauth_callback():
+        code = request.args.get("code")
+        error = request.args.get("error")
+        if error:
+            flash(f"マネーフォワード認証が失敗しました: {error}", "error")
+            return redirect(url_for("mf_status"))
+        if not code:
+            flash("認可コードが取得できませんでした。", "error")
+            return redirect(url_for("mf_status"))
+        return _mf_exchange(code)
+
+    @app.route("/mf/oauth/code", methods=["POST"])
+    @login_required
+    def mf_oauth_code():
+        code = (request.form.get("code") or "").strip()
+        if not code:
+            flash("認可コードを入力してください。", "error")
+            return redirect(url_for("mf_status"))
+        return _mf_exchange(code)
+
+    def _mf_exchange(code):
+        try:
+            mf_client.exchange_code(code)
+            flash("マネーフォワードと連携しました。事業所を選択してください。", "success")
+            return redirect(url_for("mf_offices"))
+        except mf_client.MFError as exc:
+            flash(str(exc), "error")
+            return redirect(url_for("mf_status"))
+
+    @app.route("/mf/token", methods=["POST"])
+    @login_required
+    def mf_token():
+        access_token = (request.form.get("access_token") or "").strip()
+        refresh_tok = (request.form.get("refresh_token") or "").strip()
+        if not access_token:
+            flash("アクセストークンを入力してください。", "error")
+            return redirect(url_for("mf_status"))
+        mf_client.save_manual_token(access_token, refresh_tok)
+        flash("アクセストークンを保存しました。", "success")
+        return redirect(url_for("mf_offices"))
+
+    @app.route("/mf/disconnect", methods=["POST"])
+    @login_required
+    def mf_disconnect():
+        mf_client.disconnect()
+        flash("マネーフォワード連携を解除しました。", "success")
+        return redirect(url_for("mf_status"))
+
+    @app.route("/mf/offices")
+    @login_required
+    def mf_offices():
+        conn = MFConnection.get()
+        if not conn.is_connected:
+            flash("先にマネーフォワードと連携してください。", "error")
+            return redirect(url_for("mf_status"))
+        try:
+            offices = mf_client.list_offices(conn)
+        except mf_client.MFError as exc:
+            flash(str(exc), "error")
+            return redirect(url_for("mf_status"))
+        return render_template("mf_offices.html", conn=conn, offices=offices)
+
+    @app.route("/mf/select-office", methods=["POST"])
+    @login_required
+    def mf_select_office():
+        conn = MFConnection.get()
+        office_id = (request.form.get("office_id") or "").strip()
+        office_name = request.form.get("office_name") or ""
+        if not office_id:
+            flash("事業所を選択してください。", "error")
+            return redirect(url_for("mf_offices"))
+        conn.office_id = office_id
+        conn.office_name = office_name
+        db.session.commit()
+        flash(f"事業所「{office_name}」を選択しました。", "success")
+        return redirect(url_for("mf_import_deals"))
+
+    @app.route("/mf/import", methods=["GET", "POST"])
+    @login_required
+    def mf_import_deals():
+        """マネーフォワードの取引を取り込む。"""
+        conn = MFConnection.get()
+        if not conn.is_connected or not conn.office_id:
+            flash("先にマネーフォワード連携と事業所選択を行ってください。", "error")
+            return redirect(url_for("mf_status"))
+
+        imported_count = ImportedDeal.query.filter_by(
+            scope_key=make_scope_key(SOURCE_MF, office_id=conn.office_id)
+        ).count()
+
+        if request.method == "POST":
+            try:
+                result = mf_client.list_deals(conn, conn.office_id)
+            except mf_client.MFError as exc:
+                flash(str(exc), "error")
+                return render_template(
+                    "mf_import.html", conn=conn, imported_count=imported_count
+                )
+
+            deals = (
+                result.get("deals")
+                or result.get("data")
+                or (result if isinstance(result, list) else [])
+            )
+            scope_key = make_scope_key(SOURCE_MF, office_id=conn.office_id)
+            created, updated = 0, 0
+            for d in deals:
+                # MFのレスポンス構造は環境により異なるため防御的に読む
+                did = d.get("id") or d.get("deal_id")
+                if did is None:
+                    continue
+                existing = ImportedDeal.query.filter_by(
+                    scope_key=scope_key, deal_id=did
+                ).first()
+                if existing is None:
+                    existing = ImportedDeal(deal_id=did)
+                    db.session.add(existing)
+                    created += 1
+                else:
+                    updated += 1
+                existing.source = SOURCE_MF
+                existing.scope_key = scope_key
+                existing.company_id = None
+                existing.office_id = conn.office_id
+                existing.issue_date = (
+                    d.get("issue_date") or d.get("recognized_at") or d.get("date")
+                )
+                existing.deal_type = d.get("type")
+                existing.amount = d.get("amount") or d.get("value")
+                existing.partner_name = d.get("partner_name") or d.get("partner")
+                existing.status = d.get("status")
+                existing.details_json = json.dumps(
+                    d.get("details") or d, ensure_ascii=False
+                )
+                existing.receipt_ids = [
+                    r.get("id") for r in (d.get("receipts") or []) if r.get("id")
+                ]
+                existing.imported_at = datetime.utcnow()
+            db.session.commit()
+            flash(
+                f"マネーフォワードの取引 {len(deals)} 件を取り込みました（新規 {created} / 更新 {updated}）。",
+                "success",
+            )
+            return redirect(url_for("analyses"))
+
+        return render_template(
+            "mf_import.html", conn=conn, imported_count=imported_count
         )
 
 

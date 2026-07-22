@@ -22,11 +22,15 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
 from models import (
+    SOURCE_FREEE,
+    SOURCE_MF,
     DealAnalysis,
     FreeeConnection,
     ImportedDeal,
     ImportedReceipt,
+    MFConnection,
     db,
+    make_scope_key,
 )
 
 
@@ -50,15 +54,31 @@ db.metadata.create_all(_engine)  # テーブルが無ければ作成
 SessionLocal = sessionmaker(bind=_engine)
 
 
-def _default_company_id(session) -> int | None:
-    conn = session.get(FreeeConnection, 1)
-    return conn.company_id if conn else None
+def _resolve_scope(session, company_id=None, office_id=None):
+    """(scope_key, source) を返す。
+
+    明示指定（company_id=freee / office_id=MF）が無ければ、有効な接続から判定する
+    （freee 接続を優先、無ければ MF 接続）。
+    """
+    if company_id is not None:
+        return make_scope_key(SOURCE_FREEE, company_id=company_id), SOURCE_FREEE
+    if office_id is not None:
+        return make_scope_key(SOURCE_MF, office_id=office_id), SOURCE_MF
+    fc = session.get(FreeeConnection, 1)
+    if fc and fc.company_id:
+        return make_scope_key(SOURCE_FREEE, company_id=fc.company_id), SOURCE_FREEE
+    mf = session.get(MFConnection, 1)
+    if mf and mf.office_id:
+        return make_scope_key(SOURCE_MF, office_id=mf.office_id), SOURCE_MF
+    return None, None
 
 
 def _deal_to_dict(d: ImportedDeal) -> dict:
     return {
         "deal_id": d.deal_id,
+        "source": d.source,
         "company_id": d.company_id,
+        "office_id": d.office_id,
         "issue_date": d.issue_date,
         "type": d.deal_type,
         "amount": d.amount,
@@ -94,16 +114,19 @@ mcp = FastMCP("accounting-support-app")
 
 
 @mcp.tool()
-def list_deals(company_id: int | None = None, limit: int = 50) -> list[dict]:
-    """取り込んだ freee の取引（仕訳）一覧を返す。
+def list_deals(
+    company_id: int | None = None, office_id: str | None = None, limit: int = 50
+) -> list[dict]:
+    """取り込んだ取引（仕訳）一覧を返す。
 
-    company_id を省略すると、アプリで選択中の事業所を対象にする。
+    対象事業所は、freee は company_id、マネーフォワードは office_id で指定する。
+    どちらも省略すると、アプリで選択中の事業所（有効な接続）を対象にする。
     """
     with SessionLocal() as s:
-        cid = company_id or _default_company_id(s)
+        scope_key, _ = _resolve_scope(s, company_id, office_id)
         q = s.query(ImportedDeal)
-        if cid:
-            q = q.filter(ImportedDeal.company_id == cid)
+        if scope_key:
+            q = q.filter(ImportedDeal.scope_key == scope_key)
         rows = (
             q.order_by(ImportedDeal.issue_date.desc())
             .limit(max(1, min(limit, 200)))
@@ -113,13 +136,15 @@ def list_deals(company_id: int | None = None, limit: int = 50) -> list[dict]:
 
 
 @mcp.tool()
-def get_deal(deal_id: int, company_id: int | None = None) -> dict:
+def get_deal(
+    deal_id: int, company_id: int | None = None, office_id: str | None = None
+) -> dict:
     """取引1件の詳細（明細と、これまでに書き込まれた解析結果）を返す。"""
     with SessionLocal() as s:
-        cid = company_id or _default_company_id(s)
+        scope_key, _ = _resolve_scope(s, company_id, office_id)
         q = s.query(ImportedDeal).filter(ImportedDeal.deal_id == deal_id)
-        if cid:
-            q = q.filter(ImportedDeal.company_id == cid)
+        if scope_key:
+            q = q.filter(ImportedDeal.scope_key == scope_key)
         d = q.first()
         if d is None:
             return {"error": f"取引 {deal_id} は見つかりませんでした。"}
@@ -133,7 +158,7 @@ def get_deal(deal_id: int, company_id: int | None = None) -> dict:
         analyses = (
             s.query(DealAnalysis)
             .filter(
-                DealAnalysis.company_id == d.company_id,
+                DealAnalysis.scope_key == d.scope_key,
                 DealAnalysis.deal_id == d.deal_id,
             )
             .order_by(DealAnalysis.created_at)
@@ -161,6 +186,7 @@ def write_analysis(
     check_type: str = "general",
     verdict: str = "",
     company_id: int | None = None,
+    office_id: str | None = None,
 ) -> dict:
     """取引に対する解析結果をアプリへ書き込む（追記／履歴として残す）。
 
@@ -169,6 +195,7 @@ def write_analysis(
     - check_type: チェック種別 "duplicate"(重複) / "receipt_link"(証憑紐付け) /
                   "ocr"(読み取り結果) / "general"
     - verdict:    任意のラベル（例: "ok" / "warning" / "error"）
+    - company_id / office_id: 対象事業所（freee は company_id、MF は office_id）
     """
     ai_name = (ai_name or "").strip()
     result = (result or "").strip()
@@ -178,27 +205,30 @@ def write_analysis(
         return {"ok": False, "error": "result は必須です。"}
 
     with SessionLocal() as s:
-        cid = company_id or _default_company_id(s)
-        if not cid:
-            return {"ok": False, "error": "company_id が特定できません。アプリで事業所を選択するか、company_id を指定してください。"}
+        scope_key, source = _resolve_scope(s, company_id, office_id)
+        if not scope_key:
+            return {"ok": False, "error": "事業所が特定できません。アプリで事業所を選択するか、company_id / office_id を指定してください。"}
 
         # 対象取引が取り込まれているか確認（無ければ書き込みを拒否）
-        exists = (
+        target = (
             s.query(ImportedDeal)
             .filter(
-                ImportedDeal.company_id == cid,
+                ImportedDeal.scope_key == scope_key,
                 ImportedDeal.deal_id == deal_id,
             )
             .first()
         )
-        if exists is None:
+        if target is None:
             return {
                 "ok": False,
                 "error": f"取引 {deal_id} は取り込まれていません。先にアプリで取り込んでください。",
             }
 
         analysis = DealAnalysis(
-            company_id=cid,
+            source=source,
+            scope_key=scope_key,
+            company_id=target.company_id,
+            office_id=target.office_id,
             deal_id=deal_id,
             ai_name=ai_name[:80],
             check_type=(check_type or "general").strip()[:40] or "general",
@@ -220,17 +250,19 @@ def write_analysis(
 # 会計チェック用ツール（重複 / 証憑紐付け / OCR読み取り結果）
 # ---------------------------------------------------------------------------
 @mcp.tool()
-def find_duplicate_candidates(company_id: int | None = None) -> list[dict]:
+def find_duplicate_candidates(
+    company_id: int | None = None, office_id: str | None = None
+) -> list[dict]:
     """仕訳の重複チェック用。
 
     取り込んだ取引のうち、発生日・金額・取引先が一致する取引を「重複候補」の
     グループとして返す（同一グループに2件以上ある場合のみ）。
     """
     with SessionLocal() as s:
-        cid = company_id or _default_company_id(s)
+        scope_key, _ = _resolve_scope(s, company_id, office_id)
         q = s.query(ImportedDeal)
-        if cid:
-            q = q.filter(ImportedDeal.company_id == cid)
+        if scope_key:
+            q = q.filter(ImportedDeal.scope_key == scope_key)
         rows = q.all()
 
         groups: dict[tuple, list] = {}
@@ -256,16 +288,18 @@ def find_duplicate_candidates(company_id: int | None = None) -> list[dict]:
 
 
 @mcp.tool()
-def list_deals_without_receipt(company_id: int | None = None, limit: int = 100) -> list[dict]:
+def list_deals_without_receipt(
+    company_id: int | None = None, office_id: str | None = None, limit: int = 100
+) -> list[dict]:
     """証憑（領収書・レシート）の紐付けチェック用。
 
     取り込んだ取引のうち、証憑（ファイルボックス）が1件も紐付いていない取引を返す。
     """
     with SessionLocal() as s:
-        cid = company_id or _default_company_id(s)
+        scope_key, _ = _resolve_scope(s, company_id, office_id)
         q = s.query(ImportedDeal)
-        if cid:
-            q = q.filter(ImportedDeal.company_id == cid)
+        if scope_key:
+            q = q.filter(ImportedDeal.scope_key == scope_key)
         rows = (
             q.order_by(ImportedDeal.issue_date.desc())
             .limit(max(1, min(limit, 500)))
@@ -276,7 +310,10 @@ def list_deals_without_receipt(company_id: int | None = None, limit: int = 100) 
 
 @mcp.tool()
 def list_receipts(
-    company_id: int | None = None, only_unlinked: bool = False, limit: int = 100
+    company_id: int | None = None,
+    office_id: str | None = None,
+    only_unlinked: bool = False,
+    limit: int = 100,
 ) -> list[dict]:
     """取り込んだ証憑（ファイルボックス）一覧を返す。OCR読み取り結果を含む。
 
@@ -284,18 +321,18 @@ def list_receipts(
     （＝証憑側から見た紐付け漏れチェック）。
     """
     with SessionLocal() as s:
-        cid = company_id or _default_company_id(s)
+        scope_key, _ = _resolve_scope(s, company_id, office_id)
         rq = s.query(ImportedReceipt)
-        if cid:
-            rq = rq.filter(ImportedReceipt.company_id == cid)
+        if scope_key:
+            rq = rq.filter(ImportedReceipt.scope_key == scope_key)
         receipts = rq.order_by(ImportedReceipt.created_at.desc()).limit(
             max(1, min(limit, 500))
         ).all()
 
         if only_unlinked:
             dq = s.query(ImportedDeal)
-            if cid:
-                dq = dq.filter(ImportedDeal.company_id == cid)
+            if scope_key:
+                dq = dq.filter(ImportedDeal.scope_key == scope_key)
             linked = set()
             for d in dq.all():
                 linked.update(d.receipt_ids)
@@ -305,17 +342,19 @@ def list_receipts(
 
 
 @mcp.tool()
-def check_receipt_ocr(deal_id: int, company_id: int | None = None) -> dict:
+def check_receipt_ocr(
+    deal_id: int, company_id: int | None = None, office_id: str | None = None
+) -> dict:
     """領収書・レシートの読み取り（OCR）結果のチェック用。
 
     指定した取引の値と、紐付いた証憑のOCR読み取り値（取引先・日付・金額）を並べ、
     自動判定した不一致フラグを添えて返す。AIはこれを元に妥当性を判断する。
     """
     with SessionLocal() as s:
-        cid = company_id or _default_company_id(s)
+        scope_key, _ = _resolve_scope(s, company_id, office_id)
         dq = s.query(ImportedDeal).filter(ImportedDeal.deal_id == deal_id)
-        if cid:
-            dq = dq.filter(ImportedDeal.company_id == cid)
+        if scope_key:
+            dq = dq.filter(ImportedDeal.scope_key == scope_key)
         d = dq.first()
         if d is None:
             return {"error": f"取引 {deal_id} は取り込まれていません。"}
@@ -325,7 +364,7 @@ def check_receipt_ocr(deal_id: int, company_id: int | None = None) -> dict:
             r = (
                 s.query(ImportedReceipt)
                 .filter(
-                    ImportedReceipt.company_id == d.company_id,
+                    ImportedReceipt.scope_key == d.scope_key,
                     ImportedReceipt.receipt_id == rid,
                 )
                 .first()
@@ -368,13 +407,15 @@ def check_receipt_ocr(deal_id: int, company_id: int | None = None) -> dict:
 
 
 @mcp.tool()
-def list_analyses(deal_id: int, company_id: int | None = None) -> list[dict]:
+def list_analyses(
+    deal_id: int, company_id: int | None = None, office_id: str | None = None
+) -> list[dict]:
     """指定した取引に書き込まれた、各AIの解析結果を返す（比較用）。"""
     with SessionLocal() as s:
-        cid = company_id or _default_company_id(s)
+        scope_key, _ = _resolve_scope(s, company_id, office_id)
         q = s.query(DealAnalysis).filter(DealAnalysis.deal_id == deal_id)
-        if cid:
-            q = q.filter(DealAnalysis.company_id == cid)
+        if scope_key:
+            q = q.filter(DealAnalysis.scope_key == scope_key)
         rows = q.order_by(DealAnalysis.created_at).all()
         return [
             {

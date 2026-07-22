@@ -23,6 +23,20 @@ Flask + SQLAlchemy アプリです。
   - ユーザー削除
   - ※最後の管理者は削除・降格できない安全装置付き
 
+### 会計ソフト連携（freee / マネーフォワード）
+freee 会計 API に加え、**マネーフォワード クラウド会計 API** にも OAuth2 連携できます。
+取り込んだデータは共通の `imported_deals`（`source` と `scope_key` でソース・事業所を区別）に
+保存され、MCPサーバー・3種チェック・解析比較はソース非依存で共通利用できます。
+
+- freee: `/freee`（連携）→ `/freee/deals`（取引・取り込み）
+- マネーフォワード: `/mf`（連携）→ `/mf/offices`（事業所選択）→ `/mf/import`（取り込み）
+- 解析比較 `/analyses` では各取引に `freee` / `mf` のソースラベルが付く
+
+> マネーフォワードの会計API/MCPは全プランに公開（審査なし・追加料金なし）。利用には
+> アプリポータルの利用開始＋権限付与のうえ「アプリ開発」でアプリを登録し、Client ID/Secret を取得します。
+> 会計APIの各エンドポイントのパスは開発者ポータル（要ログイン）に準拠する想定で、`MF_API_BASE` /
+> `MF_OFFICES_PATH` / `MF_DEALS_PATH` により実環境へ合わせられます（レスポンス項目は防御的にマッピング）。
+
 ### freee 連携（会計データの取得）
 freee 会計 API と OAuth2 連携し、事業所の取引（仕訳）データを取得・表示します。
 「複数AIで仕訳チェック」を行う前の土台となる、データ取得の仕組みです。
@@ -171,3 +185,7 @@ python app.py
 | `FREEE_CLIENT_ID` | freee アプリのクライアントID（freee OAuth連携用） |
 | `FREEE_CLIENT_SECRET` | freee アプリのクライアントシークレット |
 | `FREEE_REDIRECT_URI` | freee リダイレクトURI（未設定時は OOB を使用） |
+| `MF_CLIENT_ID` / `MF_CLIENT_SECRET` | マネーフォワード クラウドのアプリのクライアントID/シークレット |
+| `MF_REDIRECT_URI` | MF リダイレクトURI（未設定時は OOB を使用） |
+| `MF_SCOPE` | MF OAuth スコープ（必要に応じて） |
+| `MF_API_BASE` / `MF_OFFICES_PATH` / `MF_DEALS_PATH` | MF 会計APIのベースURL・パス（実環境に合わせて調整可能） |

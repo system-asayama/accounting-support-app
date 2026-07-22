@@ -16,12 +16,15 @@
 </div>
 
 <div class="card">
-  <h1>📗 freee 連携</h1>
+  <h1>📗 会計ソフト連携（freee / マネーフォワード）</h1>
   <p class="muted">
-    freee と API 連携して、事業所の取引データ（仕訳）を取得・表示します。
-    まずはここでデータを取得できる状態にするのが第一歩です。
+    会計ソフトと API 連携して、事業所の取引データ（仕訳）を取得します。
+    取り込んだデータは各AIが MCP 経由でチェックし、結果を「解析比較」に集約します。
   </p>
-  <a href="{{ url_for('freee_status') }}"><button>freee 連携へ</button></a>
+  <div class="inline" style="flex-wrap:wrap; gap:8px;">
+    <a href="{{ url_for('freee_status') }}"><button>freee 連携へ</button></a>
+    <a href="{{ url_for('mf_status') }}"><button type="button" class="secondary">マネーフォワード連携へ</button></a>
+  </div>
 </div>
 
 <div class="card">

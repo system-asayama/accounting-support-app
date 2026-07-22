@@ -1,0 +1,21 @@
+{% extends "base.html" %}
+{% block title %}取引の取り込み（MF）{% endblock %}
+{% block content %}
+<div class="card">
+  <h1>取引の取り込み（マネーフォワード）</h1>
+  <p class="muted">
+    事業所: <strong>{{ conn.office_name }}</strong>（ID: {{ conn.office_id }}）
+    ・<a class="link" href="{{ url_for('mf_offices') }}">事業所を変更</a>
+  </p>
+  <p class="muted">取り込み済み: {{ imported_count }} 件 ・
+    <a class="link" href="{{ url_for('analyses') }}">解析比較へ →</a></p>
+
+  <form method="post" action="{{ url_for('mf_import_deals') }}">
+    <button type="submit">マネーフォワードの取引を取り込む</button>
+  </form>
+  <p class="muted" style="margin-top:10px;">
+    取り込んだデータは freee と同じく MCP 経由で各AIが読み取り、解析結果を書き戻せます。
+    解析比較画面では <span class="badge admin">mf</span> ラベルで区別されます。
+  </p>
+</div>
+{% endblock %}

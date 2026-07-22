@@ -1,0 +1,72 @@
+{% extends "base.html" %}
+{% block title %}マネーフォワード連携{% endblock %}
+{% block content %}
+<div class="card">
+  <h1>マネーフォワード クラウド会計 連携</h1>
+
+  {% if conn.is_connected %}
+    <p>
+      状態:
+      {% if conn.is_expired %}<span class="badge error">トークン期限切れ</span>
+      {% else %}<span class="badge success">連携済み</span>{% endif %}
+    </p>
+    {% if conn.office_name %}
+      <p class="muted">選択中の事業所: <strong>{{ conn.office_name }}</strong>（ID: {{ conn.office_id }}）</p>
+    {% else %}
+      <p class="muted">まだ事業所が選択されていません。</p>
+    {% endif %}
+    <div class="inline">
+      <a href="{{ url_for('mf_offices') }}"><button type="button">事業所を選ぶ</button></a>
+      {% if conn.office_id %}
+        <a href="{{ url_for('mf_import_deals') }}"><button type="button" class="secondary">取引を取り込む</button></a>
+      {% endif %}
+      <form method="post" action="{{ url_for('mf_disconnect') }}"
+            onsubmit="return confirm('マネーフォワード連携を解除しますか？');">
+        <button class="danger small" type="submit">連携解除</button>
+      </form>
+    </div>
+  {% else %}
+    <p><span class="badge off">未連携</span></p>
+  {% endif %}
+</div>
+
+<div class="card">
+  <h1>接続方法</h1>
+  {% if configured %}
+    <p class="muted">
+      アプリ（クライアントID/シークレット）が設定されています。下のボタンから認可してください。
+    </p>
+    <a href="{{ url_for('mf_oauth_start') }}"><button>マネーフォワードで認可する</button></a>
+
+    {% if redirect_uri == oob %}
+    <hr style="margin:20px 0; border:none; border-top:1px solid #eee;">
+    <p class="muted">認可後に表示された<strong>認可コード</strong>を貼り付けてください。</p>
+    <form method="post" action="{{ url_for('mf_oauth_code') }}">
+      <label for="code">認可コード</label>
+      <input id="code" name="code">
+      <button type="submit">コードを送信して連携</button>
+    </form>
+    {% else %}
+    <p class="muted" style="margin-top:12px;">登録済みリダイレクトURI: <code>{{ redirect_uri }}</code></p>
+    {% endif %}
+  {% else %}
+    <p class="muted">
+      環境変数 <code>MF_CLIENT_ID</code> / <code>MF_CLIENT_SECRET</code> が未設定です。<br>
+      マネーフォワード クラウドの「アプリ開発」でアプリを登録し（アプリポータルの利用開始＋権限付与が必要）、
+      これらを設定すると OAuth 連携が使えます。
+      （リダイレクトURIは <code>MF_REDIRECT_URI</code>、会計APIのベースURL/パスは <code>MF_API_BASE</code> 等で調整可能）
+    </p>
+  {% endif %}
+</div>
+
+<div class="card">
+  <h1>アクセストークンを直接入力（簡易）</h1>
+  <form method="post" action="{{ url_for('mf_token') }}">
+    <label for="access_token">アクセストークン</label>
+    <input id="access_token" name="access_token" required>
+    <label for="refresh_token">リフレッシュトークン（任意）</label>
+    <input id="refresh_token" name="refresh_token">
+    <button type="submit">保存して連携</button>
+  </form>
+</div>
+{% endblock %}

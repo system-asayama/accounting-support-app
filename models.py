@@ -145,18 +145,33 @@ class BroadcastResult(db.Model):
             return []
 
 
+# 会計ソース
+SOURCE_FREEE = "freee"
+SOURCE_MF = "mf"
+
+
+def make_scope_key(source: str, company_id=None, office_id=None) -> str:
+    """事業所スコープを表す一意キー。freee は company_id、MF は office_id で識別する。"""
+    if source == SOURCE_MF:
+        return f"mf:{office_id}"
+    return f"freee:{company_id}"
+
+
 class ImportedDeal(db.Model):
-    """freee から取り込んだ取引（仕訳）のスナップショット。
+    """会計ソース（freee / MF）から取り込んだ取引（仕訳）のスナップショット。
 
     MCPサーバー経由で各AIが読み取る「解析対象データ」。live取得と切り離し、
-    取り込み時点のデータを保持する。
+    取り込み時点のデータを保持する。scope_key で事業所単位に絞り込む。
     """
 
     __tablename__ = "imported_deals"
 
     id = db.Column(db.Integer, primary_key=True)
-    company_id = db.Column(db.Integer, nullable=False, index=True)
-    deal_id = db.Column(db.Integer, nullable=False)  # freee 上の取引ID
+    source = db.Column(db.String(20), nullable=False, default=SOURCE_FREEE)
+    scope_key = db.Column(db.String(120), nullable=True, index=True)
+    company_id = db.Column(db.Integer, nullable=True, index=True)  # freee 事業所ID
+    office_id = db.Column(db.String(80), nullable=True)  # MF 事業所ID
+    deal_id = db.Column(db.Integer, nullable=False)  # ソース上の取引ID
     issue_date = db.Column(db.String(20), nullable=True)
     deal_type = db.Column(db.String(20), nullable=True)  # income / expense
     amount = db.Column(db.BigInteger, nullable=True)
@@ -190,7 +205,7 @@ class ImportedDeal(db.Model):
 
     analyses = db.relationship(
         "DealAnalysis",
-        primaryjoin="and_(foreign(DealAnalysis.company_id)==ImportedDeal.company_id, "
+        primaryjoin="and_(foreign(DealAnalysis.scope_key)==ImportedDeal.scope_key, "
         "foreign(DealAnalysis.deal_id)==ImportedDeal.deal_id)",
         viewonly=True,
         order_by="DealAnalysis.created_at",
@@ -207,8 +222,11 @@ class ImportedReceipt(db.Model):
     __tablename__ = "imported_receipts"
 
     id = db.Column(db.Integer, primary_key=True)
-    company_id = db.Column(db.Integer, nullable=False, index=True)
-    receipt_id = db.Column(db.Integer, nullable=False)  # freee 上のファイルボックスID
+    source = db.Column(db.String(20), nullable=False, default=SOURCE_FREEE)
+    scope_key = db.Column(db.String(120), nullable=True, index=True)
+    company_id = db.Column(db.Integer, nullable=True, index=True)
+    office_id = db.Column(db.String(80), nullable=True)
+    receipt_id = db.Column(db.Integer, nullable=False)  # ソース上の証憑ID
     status = db.Column(db.String(20), nullable=True)
     description = db.Column(db.String(255), nullable=True)
     document_type = db.Column(db.String(20), nullable=True)  # receipt / invoice / other
@@ -232,7 +250,10 @@ class DealAnalysis(db.Model):
     __tablename__ = "deal_analyses"
 
     id = db.Column(db.Integer, primary_key=True)
-    company_id = db.Column(db.Integer, nullable=False, index=True)
+    source = db.Column(db.String(20), nullable=False, default=SOURCE_FREEE)
+    scope_key = db.Column(db.String(120), nullable=True, index=True)
+    company_id = db.Column(db.Integer, nullable=True, index=True)
+    office_id = db.Column(db.String(80), nullable=True)
     deal_id = db.Column(db.Integer, nullable=False, index=True)
     ai_name = db.Column(db.String(80), nullable=False)  # Claude / ChatGPT / Gemini など
     # チェック種別: duplicate（重複）/ receipt_link（証憑紐付け）/ ocr（読み取り結果）/ general
@@ -274,6 +295,44 @@ class FreeeConnection(db.Model):
     @classmethod
     def get(cls) -> "FreeeConnection":
         """唯一の接続レコードを取得（無ければ作成）する。"""
+        conn = db.session.get(cls, 1)
+        if conn is None:
+            conn = cls(id=1)
+            db.session.add(conn)
+            db.session.commit()
+        return conn
+
+
+class MFConnection(db.Model):
+    """マネーフォワード クラウド会計 API との接続情報（トークン・選択中の事業所）。
+
+    freee と同じくシングルトン（id=1）。office_id は文字列（UUID等の可能性）で保持する。
+    """
+
+    __tablename__ = "mf_connections"
+
+    id = db.Column(db.Integer, primary_key=True)
+    access_token = db.Column(db.Text, nullable=True)
+    refresh_token = db.Column(db.Text, nullable=True)
+    token_expires_at = db.Column(db.DateTime, nullable=True)
+    office_id = db.Column(db.String(80), nullable=True)  # 選択中の事業所ID
+    office_name = db.Column(db.String(255), nullable=True)
+    updated_at = db.Column(
+        db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False
+    )
+
+    @property
+    def is_connected(self) -> bool:
+        return bool(self.access_token)
+
+    @property
+    def is_expired(self) -> bool:
+        if not self.token_expires_at:
+            return False
+        return datetime.utcnow() >= self.token_expires_at
+
+    @classmethod
+    def get(cls) -> "MFConnection":
         conn = db.session.get(cls, 1)
         if conn is None:
             conn = cls(id=1)

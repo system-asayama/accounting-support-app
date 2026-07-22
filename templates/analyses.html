@@ -5,7 +5,7 @@
   <h1>解析比較（各AIの結果）</h1>
   <p class="muted">
     取り込んだ取引に対して、各AI（Claude / ChatGPT / Gemini）が MCP 経由で書き込んだ解析結果を並べて比較します。
-    {% if conn.company_name %}事業所: <strong>{{ conn.company_name }}</strong>{% endif %}
+    {% if scope_name %}事業所: <strong>{{ scope_name }}</strong>{% endif %}
   </p>
   <div class="inline" style="flex-wrap:wrap; gap:8px;">
     {% for app in ai_apps %}
@@ -28,6 +28,7 @@
   <div class="inline" style="justify-content:space-between; flex-wrap:wrap; gap:8px;">
     <div>
       <strong>#{{ d.deal_id }}</strong>
+      <span class="badge {% if d.source == 'mf' %}admin{% else %}user{% endif %}">{{ d.source }}</span>
       <span class="muted">{{ d.issue_date }}</span>
       {% if d.deal_type == 'income' %}<span class="badge success">収入</span>
       {% elif d.deal_type == 'expense' %}<span class="badge error">支出</span>{% endif %}
