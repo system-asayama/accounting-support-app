@@ -50,14 +50,43 @@
     <p class="muted" style="margin-top:12px;">登録済みリダイレクトURI: <code>{{ redirect_uri }}</code></p>
     {% endif %}
   {% else %}
-    <p class="muted">
-      環境変数 <code>MF_CLIENT_ID</code> / <code>MF_CLIENT_SECRET</code> が未設定です。<br>
-      マネーフォワード クラウドの「アプリ開発」でアプリを登録し（アプリポータルの利用開始＋権限付与が必要）、
-      これらを設定すると OAuth 連携が使えます。
-      （リダイレクトURIは <code>MF_REDIRECT_URI</code>、会計APIのベースURL/パスは <code>MF_API_BASE</code> 等で調整可能）
-    </p>
+    <p class="muted">まだ設定されていません。以下の手順で連携できます。</p>
+    <ol class="steps">
+      <li>
+        <strong>マネーフォワードでアプリを登録</strong><br>
+        管理者（全権管理）で「アプリポータル」の利用開始＋利用者へ「システム管理／アプリ開発」権限を付与 →
+        「アプリ開発」で新規アプリを登録します（全プラン公開・審査なし）。
+      </li>
+      <li>
+        <strong>コールバックURL（リダイレクトURI）を登録</strong>
+        <div class="copyrow" style="margin-top:6px;">
+          <code id="mf-cb-url">{{ callback_url }}</code>
+          <button type="button" class="small" onclick="copyText('mf-cb-url', this)">コピー</button>
+        </div>
+      </li>
+      <li>
+        <strong>サーバーに環境変数を設定</strong>（<code>~/apps/accounting-support-app/.env</code>）して再起動
+        <pre class="codebox">MF_CLIENT_ID=（あなたのClient ID）
+MF_CLIENT_SECRET=（あなたのClient Secret）
+MF_REDIRECT_URI={{ callback_url }}</pre>
+        <pre class="codebox">cd ~/apps/accounting-support-app
+WEB_PORT=8005 docker compose up -d --force-recreate</pre>
+        <span class="muted">会計APIのパスが実環境と異なる場合は <code>MF_API_BASE</code> / <code>MF_OFFICES_PATH</code> / <code>MF_DEALS_PATH</code> で調整できます。</span>
+      </li>
+      <li>
+        <strong>このページを再読み込み</strong>して認可 → 事業所選択 → 取引を取り込む。
+      </li>
+    </ol>
   {% endif %}
 </div>
+
+<script>
+  function copyText(id, btn) {
+    var t = document.getElementById(id).textContent;
+    var done = function () { var o = btn.textContent; btn.textContent = 'コピー済'; setTimeout(function(){ btn.textContent = o; }, 1200); };
+    if (navigator.clipboard && navigator.clipboard.writeText) { navigator.clipboard.writeText(t).then(done, done); } else { done(); }
+  }
+</script>
 
 <div class="card">
   <h1>アクセストークンを直接入力（簡易）</h1>

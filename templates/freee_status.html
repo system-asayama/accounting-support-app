@@ -56,13 +56,50 @@
     {% endif %}
   {% else %}
     <p class="muted">
-      環境変数 <code>FREEE_CLIENT_ID</code> / <code>FREEE_CLIENT_SECRET</code> が未設定です。<br>
-      <a class="link" href="https://app.secure.freee.co.jp/developers/applications" target="_blank" rel="noopener">freee アプリ管理</a>
-      でアプリを登録し、これらを設定すると OAuth 連携が使えます。
-      （リダイレクトURIは <code>FREEE_REDIRECT_URI</code>、未設定時は OOB を使用）
+      まだ設定されていません。以下の手順で連携できます。
     </p>
+    <ol class="steps">
+      <li>
+        <strong>freee でアプリを登録</strong><br>
+        <a class="link" href="https://app.secure.freee.co.jp/developers/applications" target="_blank" rel="noopener">freee アプリ管理</a>
+        を開き「新しいアプリを作成」。会計の<strong>参照</strong>権限（取引・事業所・勘定科目・取引先・ファイルボックス）を有効にします。
+      </li>
+      <li>
+        <strong>コールバックURL（リダイレクトURI）を登録</strong><br>
+        freee のアプリ設定に、下記をそのまま登録してください。
+        <div class="copyrow" style="margin-top:6px;">
+          <code id="cb-url">{{ callback_url }}</code>
+          <button type="button" class="small" onclick="copyText('cb-url', this)">コピー</button>
+        </div>
+      </li>
+      <li>
+        <strong>サーバーに環境変数を設定</strong><br>
+        作成後に表示される Client ID / Secret を、本番サーバーの
+        <code>~/apps/accounting-support-app/.env</code> に設定して再起動します。
+        <pre class="codebox">FREEE_CLIENT_ID=（あなたのClient ID）
+FREEE_CLIENT_SECRET=（あなたのClient Secret）
+FREEE_REDIRECT_URI={{ callback_url }}</pre>
+        <div class="copyrow">
+          <span class="muted">反映（再起動）:</span>
+        </div>
+        <pre class="codebox">cd ~/apps/accounting-support-app
+WEB_PORT=8005 docker compose up -d --force-recreate</pre>
+        <span class="muted"><code>.env</code> は git 管理外なので、以降のデプロイでも維持されます。</span>
+      </li>
+      <li>
+        <strong>このページを再読み込み</strong>して「freee で認可する」→ ログイン許可 → 事業所選択 → 取引を取り込む。
+      </li>
+    </ol>
   {% endif %}
 </div>
+
+<script>
+  function copyText(id, btn) {
+    var t = document.getElementById(id).textContent;
+    var done = function () { var o = btn.textContent; btn.textContent = 'コピー済'; setTimeout(function(){ btn.textContent = o; }, 1200); };
+    if (navigator.clipboard && navigator.clipboard.writeText) { navigator.clipboard.writeText(t).then(done, done); } else { done(); }
+  }
+</script>
 
 <div class="card">
   <h1>アクセストークンを直接入力（簡易）</h1>

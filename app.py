@@ -573,12 +573,16 @@ def _register_routes(app: Flask) -> None:
     @login_required
     def freee_status():
         conn = FreeeConnection.get()
+        callback_url = url_for("freee_oauth_callback", _external=True).replace(
+            "http://", "https://"
+        )
         return render_template(
             "freee_status.html",
             conn=conn,
             configured=freee_client.is_configured(),
             redirect_uri=freee_client.get_config()["redirect_uri"],
             oob=freee_client.OOB_REDIRECT,
+            callback_url=callback_url,
         )
 
     @app.route("/freee/oauth/start")
@@ -881,12 +885,16 @@ def _register_routes(app: Flask) -> None:
     @login_required
     def mf_status():
         conn = MFConnection.get()
+        callback_url = url_for("mf_oauth_callback", _external=True).replace(
+            "http://", "https://"
+        )
         return render_template(
             "mf_status.html",
             conn=conn,
             configured=mf_client.is_configured(),
             redirect_uri=mf_client.get_config()["redirect_uri"],
             oob=mf_client.OOB_REDIRECT,
+            callback_url=callback_url,
         )
 
     @app.route("/mf/oauth/start")
