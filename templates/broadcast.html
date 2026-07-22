@@ -2,7 +2,12 @@
 {% block title %}一斉指示{% endblock %}
 {% block content %}
 <div class="card">
-  <h1>一斉指示</h1>
+  <h1>一斉指示（自動・上級者向け）</h1>
+  <p class="flash error" style="margin:0 0 12px;">
+    ⚠️ この機能は各社のAPIを直接呼び出すため<strong>従量課金</strong>です（各エージェントにAPIキーが必要）。
+    定額プランで使う場合は
+    <a class="link" href="{{ url_for('analyses') }}">解析比較（MCP集約方式）</a>をご利用ください。
+  </p>
   <p class="muted">
     1つの指示を、有効な全エージェント（{{ agents | length }} 件）へまとめて送信します。
     各エージェントは自分のMCPサーバーを使って処理し、結果を一覧表示します。

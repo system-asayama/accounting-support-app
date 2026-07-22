@@ -2,7 +2,11 @@
 {% block title %}エージェント一覧{% endblock %}
 {% block content %}
 <div class="card">
-  <h1>AIエージェント</h1>
+  <h1>AIエージェント（自動一斉指示用・上級者向け）</h1>
+  <p class="flash error" style="margin:0 0 12px;">
+    ⚠️ ここで登録したエージェントは各社APIを直接呼び出すため<strong>従量課金</strong>です（APIキーが必要）。
+    定額プランで使う場合は「解析比較（MCP集約方式）」をご利用ください。
+  </p>
   <p class="muted">
     「エージェント = モデル + システムプロンプト + 利用するMCPサーバー群」です。
     ここに登録したエージェントへ、<a class="link" href="{{ url_for('broadcast') }}">一斉指示</a>で同じ指示をまとめて送れます。

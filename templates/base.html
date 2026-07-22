@@ -79,8 +79,6 @@
         <a href="{{ url_for('mf_status') }}">MF連携</a>
         <a href="{{ url_for('prompts') }}">チェック手順</a>
         <a href="{{ url_for('analyses') }}">解析比較</a>
-        <a href="{{ url_for('broadcast') }}">一斉指示</a>
-        <a href="{{ url_for('agents') }}">エージェント</a>
         {% if current_user.is_admin %}<a href="{{ url_for('admin_users') }}">ユーザー管理</a>{% endif %}
         {% if current_user.is_admin %}<a href="{{ url_for('admin_settings') }}">管理者設定</a>
         {% else %}<a href="{{ url_for('settings') }}">アカウント設定</a>{% endif %}
