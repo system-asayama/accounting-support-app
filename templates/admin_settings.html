@@ -1,0 +1,26 @@
+{% extends "base.html" %}
+{% block title %}管理者設定{% endblock %}
+{% block content %}
+<div class="card narrow">
+  <h1>⚙️ 管理者設定</h1>
+  <p class="muted">ログインIDとパスワードを変更できます。パスワードを変えない場合は空欄のままにしてください。</p>
+  <form method="post" action="{{ url_for('admin_settings') }}">
+    <label for="username">ログインID</label>
+    <input id="username" name="username" value="{{ user.username }}" required>
+
+    <label for="new_password">新しいパスワード（変更する場合のみ）</label>
+    <input id="new_password" name="new_password" type="password" autocomplete="new-password">
+
+    <label for="confirm">新しいパスワード（確認）</label>
+    <input id="confirm" name="confirm" type="password" autocomplete="new-password">
+
+    <label for="current_password">現在のパスワード（確認のため必須）</label>
+    <input id="current_password" name="current_password" type="password" autocomplete="current-password" required>
+
+    <button type="submit">更新する</button>
+  </form>
+  <p class="muted" style="margin-top:16px;">
+    <a class="link" href="{{ url_for('admin_users') }}">← ユーザー管理へ戻る</a>
+  </p>
+</div>
+{% endblock %}

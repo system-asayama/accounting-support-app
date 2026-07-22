@@ -1,0 +1,20 @@
+{% extends "base.html" %}
+{% block title %}新規登録{% endblock %}
+{% block content %}
+<div class="card narrow">
+  <h1>新規登録</h1>
+  <p class="muted">利用者アカウントを作成します。</p>
+  <form method="post" action="{{ url_for('register') }}">
+    <label for="username">ユーザー名</label>
+    <input id="username" name="username" autofocus required>
+    <label for="password">パスワード</label>
+    <input id="password" name="password" type="password" required>
+    <label for="confirm">パスワード（確認）</label>
+    <input id="confirm" name="confirm" type="password" required>
+    <button type="submit">登録する</button>
+  </form>
+  <p class="muted" style="margin-top:16px;">
+    既にアカウントをお持ちの方は <a class="link" href="{{ url_for('login') }}">ログイン</a>
+  </p>
+</div>
+{% endblock %}

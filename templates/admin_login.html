@@ -1,0 +1,18 @@
+{% extends "base.html" %}
+{% block title %}管理者ログイン{% endblock %}
+{% block content %}
+<div class="card narrow">
+  <h1>🛡️ 管理者ログイン</h1>
+  <p class="muted">管理者アカウント専用のログインページです。</p>
+  <form method="post" action="{{ url_for('admin_login') }}">
+    <label for="username">ユーザー名</label>
+    <input id="username" name="username" autofocus required>
+    <label for="password">パスワード</label>
+    <input id="password" name="password" type="password" required>
+    <button type="submit">管理者としてログイン</button>
+  </form>
+  <p class="muted" style="margin-top:16px;">
+    利用者の方は <a class="link" href="{{ url_for('login') }}">利用者ログイン</a> へ
+  </p>
+</div>
+{% endblock %}

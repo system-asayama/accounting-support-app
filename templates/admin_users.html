@@ -1,0 +1,57 @@
+{% extends "base.html" %}
+{% block title %}ユーザー管理{% endblock %}
+{% block content %}
+<div class="card">
+  <h1>ユーザー管理</h1>
+  <div class="table-wrap">
+    <table>
+      <thead>
+        <tr><th>ID</th><th>ユーザー名</th><th>ロール</th><th>作成日時</th><th>操作</th></tr>
+      </thead>
+      <tbody>
+        {% for u in users %}
+        <tr>
+          <td>{{ u.id }}</td>
+          <td class="wrap">{{ u.username }}{% if u.id == current_user.id %} <span class="muted">(あなた)</span>{% endif %}</td>
+          <td><span class="badge {{ u.role }}">{{ u.role }}</span></td>
+          <td class="muted">{{ u.created_at.strftime('%Y-%m-%d %H:%M') }}</td>
+          <td>
+            <div class="inline">
+              <form method="post" action="{{ url_for('admin_update_role', user_id=u.id) }}" class="inline">
+                <select name="role">
+                  {% for r in roles %}
+                    <option value="{{ r }}" {% if r == u.role %}selected{% endif %}>{{ r }}</option>
+                  {% endfor %}
+                </select>
+                <button class="small" type="submit">変更</button>
+              </form>
+              {% if u.id != current_user.id %}
+              <form method="post" action="{{ url_for('admin_delete_user', user_id=u.id) }}"
+                    onsubmit="return confirm('「{{ u.username }}」を削除しますか？');">
+                <button class="small danger" type="submit">削除</button>
+              </form>
+              {% endif %}
+            </div>
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+
+<div class="card">
+  <h1>ユーザーを新規作成</h1>
+  <form method="post" action="{{ url_for('admin_create_user') }}">
+    <label for="new-username">ユーザー名</label>
+    <input id="new-username" name="username" required>
+    <label for="new-password">パスワード</label>
+    <input id="new-password" name="password" type="password" required>
+    <label for="new-role">ロール</label>
+    <select id="new-role" name="role">
+      {% for r in roles %}<option value="{{ r }}">{{ r }}</option>{% endfor %}
+    </select>
+    <button type="submit">作成する</button>
+  </form>
+</div>
+{% endblock %}

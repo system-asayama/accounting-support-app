@@ -1,0 +1,24 @@
+services:
+  web:
+    build: .
+    ports:
+      - "${WEB_PORT:-8000}:8000"
+    environment:
+      DATABASE_URL: postgresql://app:app@db:5432/easy_login_system_app
+      SECRET_KEY: ${SECRET_KEY:-dev-secret-change-me}
+      ADMIN_USERNAME: ${ADMIN_USERNAME:-admin}
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD:-admin123}
+    depends_on:
+      - db
+    restart: unless-stopped
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: app
+      POSTGRES_PASSWORD: app
+      POSTGRES_DB: easy_login_system_app
+    volumes:
+      - db_data:/var/lib/postgresql/data
+    restart: unless-stopped
+volumes:
+  db_data:

@@ -1,0 +1,17 @@
+{% extends "base.html" %}
+{% block title %}ダッシュボード{% endblock %}
+{% block content %}
+<div class="card">
+  <h1>ようこそ、{{ user.username }} さん</h1>
+  <p>
+    あなたのロール:
+    <span class="badge {{ user.role }}">{{ user.role }}</span>
+  </p>
+  {% if user.is_admin %}
+    <p class="muted">あなたは管理者です。ユーザーの作成・ロール変更・削除ができます。</p>
+    <a href="{{ url_for('admin_users') }}"><button>ユーザー管理へ</button></a>
+  {% else %}
+    <p class="muted">あなたは利用者です。一般ユーザー向けの機能を利用できます。</p>
+  {% endif %}
+</div>
+{% endblock %}

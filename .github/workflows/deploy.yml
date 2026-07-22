@@ -1,0 +1,27 @@
+name: Deploy
+
+on:
+  push:
+    branches: [ main ]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  deploy-production:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Deploy via SSH (production)
+        uses: appleboy/ssh-action@v1.0.3
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          host: ${{ secrets.SSH_HOST_PRODUCTION }}
+          username: ${{ secrets.SSH_USER_PRODUCTION }}
+          port: ${{ secrets.SSH_PORT_PRODUCTION }}
+          key: ${{ secrets.SSH_PRIVATE_KEY_PRODUCTION }}
+          envs: GITHUB_TOKEN
+          script: |
+            echo "[DEBUG] target_dir=~/apps/easy-login-system-app" && echo "[DEBUG] full_name=system-asayama/easy-login-system-app" && echo "[DEBUG] branch=main" && echo "[DEBUG] deploy_mode=docker-compose" && echo "[DEBUG] hostname=$(hostname)" && echo "[DEBUG] whoami=$(whoami)" && echo "[DEBUG] git --version: $(git --version 2>&1)" && echo "[DEBUG] docker --version: $(docker --version 2>&1)" && echo "[DEBUG] docker compose version: $(docker compose version 2>&1)" && echo "[DEBUG] dir exists? $(test -d ~/apps/easy-login-system-app && echo YES || echo NO)" && echo "[DEBUG] .git exists? $(test -d ~/apps/easy-login-system-app/.git && echo YES || echo NO)" && if [ -d ~/apps/easy-login-system-app/.git ]; then echo "[DEBUG] taking git pull path" && cd ~/apps/easy-login-system-app && git remote set-url origin https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/system-asayama/easy-login-system-app.git && echo "[DEBUG] git remote URL updated" && (git pull --rebase --autostash 2>/dev/null || git pull) && echo "[DEBUG] git pull OK"; else echo "[DEBUG] taking git clone path" && mkdir -p "$(dirname ~/apps/easy-login-system-app)" && rm -rf ~/apps/easy-login-system-app && git clone --branch main https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/system-asayama/easy-login-system-app.git ~/apps/easy-login-system-app && echo "[DEBUG] git clone OK"; fi && echo "[DEBUG] post-pull, ls ~/apps/easy-login-system-app:" && ls -la ~/apps/easy-login-system-app | head -20 && cd ~/apps/easy-login-system-app && echo "[DEBUG] in ~/apps/easy-login-system-app, WEB_PORT=8002" && echo "[DEBUG] compose files:" && ls -la docker-compose* compose* 2>/dev/null && echo "[DEBUG] running docker compose up..." && WEB_PORT=8002 docker compose pull 2>/dev/null || true; WEB_PORT=8002 docker compose up -d --build --remove-orphans && echo "[DEBUG] docker ps:" && docker ps --filter "label=com.docker.compose.project" --format "{{.Names}}\t{{.Status}}\t{{.Ports}}"

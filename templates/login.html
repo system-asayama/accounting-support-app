@@ -1,0 +1,20 @@
+{% extends "base.html" %}
+{% block title %}ログイン{% endblock %}
+{% block content %}
+<div class="card narrow">
+  <h1>👤 利用者ログイン</h1>
+  <form method="post" action="{{ url_for('login') }}">
+    <label for="username">ユーザー名</label>
+    <input id="username" name="username" autofocus required>
+    <label for="password">パスワード</label>
+    <input id="password" name="password" type="password" required>
+    <button type="submit">ログイン</button>
+  </form>
+  <p class="muted" style="margin-top:16px;">
+    アカウントをお持ちでない方は <a class="link" href="{{ url_for('register') }}">新規登録</a>
+  </p>
+  <p class="muted">
+    管理者の方は <a class="link" href="{{ url_for('admin_login') }}">管理者ログイン</a> へ
+  </p>
+</div>
+{% endblock %}
