@@ -227,6 +227,27 @@ def list_partners(conn: FreeeConnection, company_id: int, limit: int = 100) -> l
     return data.get("partners", [])
 
 
+def list_receipts(
+    conn: FreeeConnection,
+    company_id: int,
+    start_date: str,
+    end_date: str,
+    category: str = None,
+    limit: int = 100,
+) -> list:
+    """ファイルボックス（証憑ファイル）一覧を取得。start_date/end_date は必須。"""
+    params = {
+        "company_id": company_id,
+        "start_date": start_date,
+        "end_date": end_date,
+        "limit": limit,
+    }
+    if category:
+        params["category"] = category
+    data = api_get(conn, "/api/1/receipts", params)
+    return data.get("receipts", [])
+
+
 def get_trial_pl(conn: FreeeConnection, company_id: int, fiscal_year: int = None) -> dict:
     params = {"company_id": company_id}
     if fiscal_year:

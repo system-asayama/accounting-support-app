@@ -164,11 +164,29 @@ class ImportedDeal(db.Model):
     status = db.Column(db.String(20), nullable=True)
     account_items = db.Column(db.Text, nullable=True)  # 明細の勘定科目名（可読用）
     details_json = db.Column(db.Text, nullable=True)  # 明細の生データ(JSON)
+    # 紐付いた証憑（ファイルボックス）ID の JSON 配列
+    receipt_ids_json = db.Column(db.Text, nullable=False, default="[]")
     imported_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
 
     __table_args__ = (
         db.UniqueConstraint("company_id", "deal_id", name="uq_imported_deal"),
     )
+
+    @property
+    def receipt_ids(self) -> list:
+        try:
+            data = json.loads(self.receipt_ids_json or "[]")
+            return data if isinstance(data, list) else []
+        except (ValueError, TypeError):
+            return []
+
+    @receipt_ids.setter
+    def receipt_ids(self, value) -> None:
+        self.receipt_ids_json = json.dumps(value or [], ensure_ascii=False)
+
+    @property
+    def has_receipt(self) -> bool:
+        return len(self.receipt_ids) > 0
 
     analyses = db.relationship(
         "DealAnalysis",
@@ -176,6 +194,35 @@ class ImportedDeal(db.Model):
         "foreign(DealAnalysis.deal_id)==ImportedDeal.deal_id)",
         viewonly=True,
         order_by="DealAnalysis.created_at",
+    )
+
+
+class ImportedReceipt(db.Model):
+    """freee ファイルボックスから取り込んだ証憑（領収書・レシート）のスナップショット。
+
+    OCR 解析結果（receipt_metadatum）を保持し、取引との紐付け・読み取り結果の
+    チェックに使う。
+    """
+
+    __tablename__ = "imported_receipts"
+
+    id = db.Column(db.Integer, primary_key=True)
+    company_id = db.Column(db.Integer, nullable=False, index=True)
+    receipt_id = db.Column(db.Integer, nullable=False)  # freee 上のファイルボックスID
+    status = db.Column(db.String(20), nullable=True)
+    description = db.Column(db.String(255), nullable=True)
+    document_type = db.Column(db.String(20), nullable=True)  # receipt / invoice / other
+    origin = db.Column(db.String(40), nullable=True)
+    created_at = db.Column(db.String(40), nullable=True)  # アップロード日時(ISO8601)
+    # OCR 読み取り結果（receipt_metadatum から抽出）
+    ocr_partner_name = db.Column(db.String(255), nullable=True)
+    ocr_issue_date = db.Column(db.String(20), nullable=True)
+    ocr_amount = db.Column(db.BigInteger, nullable=True)
+    metadatum_json = db.Column(db.Text, nullable=True)  # receipt_metadatum の生データ
+    imported_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
+
+    __table_args__ = (
+        db.UniqueConstraint("company_id", "receipt_id", name="uq_imported_receipt"),
     )
 
 
@@ -188,6 +235,8 @@ class DealAnalysis(db.Model):
     company_id = db.Column(db.Integer, nullable=False, index=True)
     deal_id = db.Column(db.Integer, nullable=False, index=True)
     ai_name = db.Column(db.String(80), nullable=False)  # Claude / ChatGPT / Gemini など
+    # チェック種別: duplicate（重複）/ receipt_link（証憑紐付け）/ ocr（読み取り結果）/ general
+    check_type = db.Column(db.String(40), nullable=True)
     result = db.Column(db.Text, nullable=False)
     verdict = db.Column(db.String(40), nullable=True)  # ok / warning / error など任意ラベル
     created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)

@@ -36,6 +36,7 @@ from models import (
     DealAnalysis,
     FreeeConnection,
     ImportedDeal,
+    ImportedReceipt,
     User,
     db,
 )
@@ -736,6 +737,7 @@ def _register_routes(app: Flask) -> None:
                 account_map.get(det.get("account_item_id"), str(det.get("account_item_id")))
                 for det in details
             )
+            receipt_ids = [r.get("id") for r in (d.get("receipts") or []) if r.get("id")]
             existing = ImportedDeal.query.filter_by(
                 company_id=conn.company_id, deal_id=d["id"]
             ).first()
@@ -752,11 +754,46 @@ def _register_routes(app: Flask) -> None:
             existing.status = d.get("status")
             existing.account_items = names or None
             existing.details_json = json.dumps(details, ensure_ascii=False)
+            existing.receipt_ids = receipt_ids
             existing.imported_at = datetime.utcnow()
+
+        # 証憑（ファイルボックス／OCR結果）の取り込み（期間指定がある場合のみ）
+        receipt_msg = "証憑は期間未指定のため取り込みませんでした。"
+        if start and end:
+            try:
+                receipts = freee_client.list_receipts(
+                    conn, conn.company_id, start, end
+                )
+                r_created = 0
+                for r in receipts:
+                    meta = r.get("receipt_metadatum") or {}
+                    amount = meta.get("amount")
+                    ir = ImportedReceipt.query.filter_by(
+                        company_id=conn.company_id, receipt_id=r["id"]
+                    ).first()
+                    if ir is None:
+                        ir = ImportedReceipt(
+                            company_id=conn.company_id, receipt_id=r["id"]
+                        )
+                        db.session.add(ir)
+                        r_created += 1
+                    ir.status = r.get("status")
+                    ir.description = (r.get("description") or "")[:255] or None
+                    ir.document_type = r.get("document_type")
+                    ir.origin = r.get("origin")
+                    ir.created_at = r.get("created_at")
+                    ir.ocr_partner_name = (meta.get("partner_name") or None)
+                    ir.ocr_issue_date = (meta.get("issue_date") or None)
+                    ir.ocr_amount = int(amount) if isinstance(amount, (int, float)) else None
+                    ir.metadatum_json = json.dumps(meta, ensure_ascii=False)
+                    ir.imported_at = datetime.utcnow()
+                receipt_msg = f"証憑 {len(receipts)} 件を取り込みました（新規 {r_created}）。"
+            except freee_client.FreeeError as exc:
+                receipt_msg = f"証憑の取り込みに失敗: {exc}"
 
         db.session.commit()
         flash(
-            f"{len(deals)} 件を取り込みました（新規 {created} / 更新 {updated}）。",
+            f"取引 {len(deals)} 件を取り込みました（新規 {created} / 更新 {updated}）。{receipt_msg}",
             "success",
         )
         return redirect(url_for("analyses"))

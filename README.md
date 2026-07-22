@@ -62,11 +62,17 @@ freee ──API──▶ アプリ(取り込み) ──MCP──▶ 各AI(解析
 ```
 
 - **取り込み** (`/freee/deals` の「アプリに取り込む」)
-  - 絞り込んだ取引を `imported_deals` に保存（各AIが読む解析対象）
+  - 絞り込んだ取引を `imported_deals` に保存（各AIが読む解析対象）。取引に紐付いた証憑IDも保存
+  - 期間を指定している場合は、ファイルボックスの証憑（OCR読み取り結果を含む）も `imported_receipts` に取り込む
 - **MCP サーバー** (`mcp_server.py`)
-  - `list_deals` / `get_deal` … 取り込んだ取引を読む
-  - `write_analysis` … 解析結果を書き込む（取り込み済みの取引のみ・追記型）
+  - `list_deals` / `get_deal` … 取り込んだ取引を読む（証憑IDの有無を含む）
+  - `write_analysis` … 解析結果を書き込む（取り込み済みの取引のみ・追記型、`check_type` 付き）
   - `list_analyses` … 書き込まれた各AIの結果を読む（比較用）
+  - **会計チェック用ツール**
+    - `find_duplicate_candidates` … 発生日・金額・取引先が一致する**仕訳の重複候補**を返す
+    - `list_deals_without_receipt` … 証憑が紐付いていない取引（**証憑の紐付け漏れ**・取引側）
+    - `list_receipts(only_unlinked=True)` … どの取引にも紐付かない証憑（**紐付け漏れ**・証憑側）
+    - `check_receipt_ocr` … 取引の値と証憑の**OCR読み取り結果**（取引先・日付・金額）を並べ、不一致フラグを返す
 - **解析比較** (`/analyses`)
   - 取引ごとに各AIの解析結果を横並び表示
 

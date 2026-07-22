@@ -25,6 +25,8 @@
       {% elif d.deal_type == 'expense' %}<span class="badge error">支出</span>{% endif %}
       ¥{{ '{:,}'.format(d.amount or 0) }}
       <span class="muted">{{ d.partner_name or '' }}</span>
+      {% if d.has_receipt %}<span class="badge success">証憑{{ d.receipt_ids | length }}</span>
+      {% else %}<span class="badge error">証憑なし</span>{% endif %}
     </div>
     <span class="muted">{{ d.account_items or '' }}</span>
   </div>
@@ -35,6 +37,7 @@
     <div class="result">
       <h3>
         {{ a.ai_name }}
+        {% if a.check_type and a.check_type != 'general' %}<span class="badge user">{{ a.check_type }}</span>{% endif %}
         {% if a.verdict == 'ok' %}<span class="badge success">{{ a.verdict }}</span>
         {% elif a.verdict in ('warning', 'error') %}<span class="badge error">{{ a.verdict }}</span>
         {% elif a.verdict %}<span class="badge user">{{ a.verdict }}</span>{% endif %}
