@@ -29,6 +29,23 @@
       <div><button type="submit">絞り込む</button></div>
     </div>
   </form>
+
+  <hr style="margin:16px 0; border:none; border-top:1px solid #eee;">
+  <div class="inline" style="flex-wrap:wrap; gap:10px; align-items:center;">
+    <form method="post" action="{{ url_for('freee_import_deals') }}">
+      <input type="hidden" name="start" value="{{ start }}">
+      <input type="hidden" name="end" value="{{ end }}">
+      <input type="hidden" name="type" value="{{ deal_type }}">
+      <button type="submit">この条件の取引をアプリに取り込む</button>
+    </form>
+    <span class="muted">
+      取り込み済み: {{ imported_count }} 件 ・
+      <a class="link" href="{{ url_for('analyses') }}">解析比較へ →</a>
+    </span>
+  </div>
+  <p class="muted" style="margin:8px 0 0;">
+    取り込んだデータは MCP 経由で各AI（Claude / ChatGPT / Gemini）が読み取り、解析結果を書き戻せます。
+  </p>
 </div>
 
 {% if error %}

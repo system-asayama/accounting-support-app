@@ -25,6 +25,15 @@
 </div>
 
 <div class="card">
+  <h1>🔗 各AIとのMCP連携（解析結果の集約）</h1>
+  <p class="muted">
+    このアプリ自身が MCP サーバーになり、取り込んだ freee データを各AI（Claude / ChatGPT / Gemini）へ提供します。
+    各AIは解析結果をアプリに書き戻し、ここで並べて比較できます。
+  </p>
+  <a href="{{ url_for('analyses') }}"><button>解析比較を見る</button></a>
+</div>
+
+<div class="card">
   <h1>🤖 MCP連携AIへの一斉指示</h1>
   <p class="muted">
     登録した複数のAIエージェント（モデル・システムプロンプト・MCPサーバーの組み合わせ）へ、

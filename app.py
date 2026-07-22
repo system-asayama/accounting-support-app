@@ -7,6 +7,7 @@
 """
 import json
 import os
+from datetime import datetime
 from functools import wraps
 
 from flask import (
@@ -32,7 +33,9 @@ from models import (
     Agent,
     Broadcast,
     BroadcastResult,
+    DealAnalysis,
     FreeeConnection,
+    ImportedDeal,
     User,
     db,
 )
@@ -673,6 +676,10 @@ def _register_routes(app: Flask) -> None:
         except freee_client.FreeeError as exc:
             error = str(exc)
 
+        imported_count = ImportedDeal.query.filter_by(
+            company_id=conn.company_id
+        ).count()
+
         return render_template(
             "freee_deals.html",
             conn=conn,
@@ -684,6 +691,96 @@ def _register_routes(app: Flask) -> None:
             end=end,
             deal_type=deal_type,
             error=error,
+            imported_count=imported_count,
+        )
+
+    @app.route("/freee/deals/import", methods=["POST"])
+    @login_required
+    def freee_import_deals():
+        """現在の絞り込み条件の取引をアプリ内へ取り込む（MCPで各AIが読む対象）。"""
+        conn = FreeeConnection.get()
+        if not conn.is_connected or not conn.company_id:
+            flash("先に freee 連携と事業所選択を行ってください。", "error")
+            return redirect(url_for("freee_status"))
+
+        start = (request.form.get("start") or "").strip()
+        end = (request.form.get("end") or "").strip()
+        deal_type = (request.form.get("type") or "").strip()
+
+        try:
+            result = freee_client.list_deals(
+                conn,
+                conn.company_id,
+                start_issue_date=start,
+                end_issue_date=end,
+                type=deal_type,
+                limit=100,
+            )
+            deals = result.get("deals", [])
+            account_map = {
+                a["id"]: a.get("name", "")
+                for a in freee_client.list_account_items(conn, conn.company_id)
+            }
+            partner_map = {
+                p["id"]: p.get("name", "")
+                for p in freee_client.list_partners(conn, conn.company_id)
+            }
+        except freee_client.FreeeError as exc:
+            flash(str(exc), "error")
+            return redirect(url_for("freee_deals"))
+
+        created, updated = 0, 0
+        for d in deals:
+            details = d.get("details") or []
+            names = " / ".join(
+                account_map.get(det.get("account_item_id"), str(det.get("account_item_id")))
+                for det in details
+            )
+            existing = ImportedDeal.query.filter_by(
+                company_id=conn.company_id, deal_id=d["id"]
+            ).first()
+            if existing is None:
+                existing = ImportedDeal(company_id=conn.company_id, deal_id=d["id"])
+                db.session.add(existing)
+                created += 1
+            else:
+                updated += 1
+            existing.issue_date = d.get("issue_date")
+            existing.deal_type = d.get("type")
+            existing.amount = d.get("amount")
+            existing.partner_name = partner_map.get(d.get("partner_id")) or None
+            existing.status = d.get("status")
+            existing.account_items = names or None
+            existing.details_json = json.dumps(details, ensure_ascii=False)
+            existing.imported_at = datetime.utcnow()
+
+        db.session.commit()
+        flash(
+            f"{len(deals)} 件を取り込みました（新規 {created} / 更新 {updated}）。",
+            "success",
+        )
+        return redirect(url_for("analyses"))
+
+    @app.route("/analyses")
+    @login_required
+    def analyses():
+        """取り込んだ取引と、各AIが書き込んだ解析結果を並べて比較する。"""
+        conn = FreeeConnection.get()
+        query = ImportedDeal.query
+        if conn.company_id:
+            query = query.filter_by(company_id=conn.company_id)
+        deals = query.order_by(ImportedDeal.issue_date.desc()).limit(200).all()
+
+        # 出現したAI名を集める（列見出し用）
+        ai_names = [
+            row[0]
+            for row in db.session.query(DealAnalysis.ai_name)
+            .distinct()
+            .order_by(DealAnalysis.ai_name)
+            .all()
+        ]
+        return render_template(
+            "analyses.html", conn=conn, deals=deals, ai_names=ai_names
         )
 
 

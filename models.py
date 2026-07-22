@@ -145,6 +145,54 @@ class BroadcastResult(db.Model):
             return []
 
 
+class ImportedDeal(db.Model):
+    """freee から取り込んだ取引（仕訳）のスナップショット。
+
+    MCPサーバー経由で各AIが読み取る「解析対象データ」。live取得と切り離し、
+    取り込み時点のデータを保持する。
+    """
+
+    __tablename__ = "imported_deals"
+
+    id = db.Column(db.Integer, primary_key=True)
+    company_id = db.Column(db.Integer, nullable=False, index=True)
+    deal_id = db.Column(db.Integer, nullable=False)  # freee 上の取引ID
+    issue_date = db.Column(db.String(20), nullable=True)
+    deal_type = db.Column(db.String(20), nullable=True)  # income / expense
+    amount = db.Column(db.BigInteger, nullable=True)
+    partner_name = db.Column(db.String(255), nullable=True)
+    status = db.Column(db.String(20), nullable=True)
+    account_items = db.Column(db.Text, nullable=True)  # 明細の勘定科目名（可読用）
+    details_json = db.Column(db.Text, nullable=True)  # 明細の生データ(JSON)
+    imported_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
+
+    __table_args__ = (
+        db.UniqueConstraint("company_id", "deal_id", name="uq_imported_deal"),
+    )
+
+    analyses = db.relationship(
+        "DealAnalysis",
+        primaryjoin="and_(foreign(DealAnalysis.company_id)==ImportedDeal.company_id, "
+        "foreign(DealAnalysis.deal_id)==ImportedDeal.deal_id)",
+        viewonly=True,
+        order_by="DealAnalysis.created_at",
+    )
+
+
+class DealAnalysis(db.Model):
+    """各AIが書き戻した、取引1件に対する解析結果（追記型・履歴として残す）。"""
+
+    __tablename__ = "deal_analyses"
+
+    id = db.Column(db.Integer, primary_key=True)
+    company_id = db.Column(db.Integer, nullable=False, index=True)
+    deal_id = db.Column(db.Integer, nullable=False, index=True)
+    ai_name = db.Column(db.String(80), nullable=False)  # Claude / ChatGPT / Gemini など
+    result = db.Column(db.Text, nullable=False)
+    verdict = db.Column(db.String(40), nullable=True)  # ok / warning / error など任意ラベル
+    created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
+
+
 class FreeeConnection(db.Model):
     """freee API との接続情報（トークン・選択中の事業所）。
 

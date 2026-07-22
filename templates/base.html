@@ -61,6 +61,7 @@
       {% if current_user %}
         <a href="{{ url_for('dashboard') }}">ダッシュボード</a>
         <a href="{{ url_for('freee_status') }}">freee連携</a>
+        <a href="{{ url_for('analyses') }}">解析比較</a>
         <a href="{{ url_for('broadcast') }}">一斉指示</a>
         <a href="{{ url_for('agents') }}">エージェント</a>
         {% if current_user.is_admin %}<a href="{{ url_for('admin_users') }}">ユーザー管理</a>{% endif %}
