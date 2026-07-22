@@ -7,6 +7,14 @@
     取り込んだ取引に対して、各AI（Claude / ChatGPT / Gemini）が MCP 経由で書き込んだ解析結果を並べて比較します。
     {% if conn.company_name %}事業所: <strong>{{ conn.company_name }}</strong>{% endif %}
   </p>
+  <div class="inline" style="flex-wrap:wrap; gap:8px;">
+    {% for app in ai_apps %}
+      <a href="{{ app.url }}" target="_blank" rel="noopener">
+        <button type="button" class="secondary small">🚀 {{ app.name }}</button>
+      </a>
+    {% endfor %}
+    <a href="{{ url_for('prompts') }}"><button type="button" class="small">チェック手順・指示雛形</button></a>
+  </div>
   {% if not deals %}
     <p class="muted">
       まだ取り込んだ取引がありません。

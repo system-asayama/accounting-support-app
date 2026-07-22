@@ -30,7 +30,17 @@
     このアプリ自身が MCP サーバーになり、取り込んだ freee データを各AI（Claude / ChatGPT / Gemini）へ提供します。
     各AIは解析結果をアプリに書き戻し、ここで並べて比較できます。
   </p>
-  <a href="{{ url_for('analyses') }}"><button>解析比較を見る</button></a>
+  <div class="inline" style="flex-wrap:wrap; gap:8px;">
+    <a href="{{ url_for('analyses') }}"><button>解析比較を見る</button></a>
+    <a href="{{ url_for('prompts') }}"><button type="button" class="secondary">チェック手順・指示雛形</button></a>
+  </div>
+  <div class="inline" style="flex-wrap:wrap; gap:8px; margin-top:10px;">
+    {% for app in ai_apps %}
+      <a href="{{ app.url }}" target="_blank" rel="noopener">
+        <button type="button" class="secondary small">🚀 {{ app.name }} を開く</button>
+      </a>
+    {% endfor %}
+  </div>
 </div>
 
 <div class="card">

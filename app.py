@@ -22,6 +22,7 @@ from flask import (
 
 import freee_client
 from broadcast_service import BroadcastError, run_broadcast
+from prompts import AI_APPS, CHECK_PROMPTS
 from models import (
     DEFAULT_MODEL,
     PROVIDER_DEFAULT_MODEL,
@@ -155,6 +156,7 @@ def _register_routes(app: Flask) -> None:
             "providers": PROVIDERS,
             "provider_labels": PROVIDER_LABELS,
             "provider_default_model": PROVIDER_DEFAULT_MODEL,
+            "ai_apps": AI_APPS,
         }
 
     @app.route("/")
@@ -797,6 +799,12 @@ def _register_routes(app: Flask) -> None:
             "success",
         )
         return redirect(url_for("analyses"))
+
+    @app.route("/prompts")
+    @login_required
+    def prompts():
+        """各AIへ配布するチェック用プロンプトの雛形を表示する。"""
+        return render_template("prompts.html", check_prompts=CHECK_PROMPTS)
 
     @app.route("/analyses")
     @login_required

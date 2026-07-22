@@ -1,0 +1,62 @@
+{% extends "base.html" %}
+{% block title %}チェック手順{% endblock %}
+{% block content %}
+<div class="card">
+  <h1>チェック手順（各AIへの指示雛形）</h1>
+  <p class="muted">
+    下の定型文をコピーして、各AI（Claude / ChatGPT / Gemini）に同じ観点で指示します。
+    各AIはこのアプリのMCPツールを使ってチェックし、結果を書き戻します。
+    集まった結果は<a class="link" href="{{ url_for('analyses') }}">解析比較</a>で見比べられます。
+  </p>
+
+  <label>AIアプリを開く</label>
+  <div class="inline" style="flex-wrap:wrap; gap:8px; margin-top:6px;">
+    {% for app in ai_apps %}
+      <a href="{{ app.url }}" target="_blank" rel="noopener">
+        <button type="button" class="secondary">🚀 {{ app.name }} を開く</button>
+      </a>
+    {% endfor %}
+  </div>
+  <p class="muted" style="margin-top:8px;">
+    ※ 事前に各AIへ MCP サーバー「accounting-support-app」を接続しておいてください
+    （Claude Code / Gemini CLI はローカル接続、ChatGPT は開発者モードで公開HTTPSのリモート接続）。
+  </p>
+</div>
+
+{% for p in check_prompts %}
+<div class="card">
+  <div class="inline" style="justify-content:space-between; flex-wrap:wrap; gap:8px;">
+    <h1 style="margin:0;">{{ p.title }}
+      <span class="badge user">check_type: {{ p.check_type }}</span>
+    </h1>
+    <button type="button" class="small" onclick="copyPrompt('prompt-{{ p.key }}', this)">コピー</button>
+  </div>
+  <textarea id="prompt-{{ p.key }}" rows="14" readonly
+            style="margin-top:10px; font-size:13px;">{{ p.body }}</textarea>
+</div>
+{% endfor %}
+
+<script>
+  function copyPrompt(id, btn) {
+    var el = document.getElementById(id);
+    var text = el.value;
+    var done = function () {
+      var old = btn.textContent;
+      btn.textContent = 'コピーしました';
+      setTimeout(function () { btn.textContent = old; }, 1500);
+    };
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(text).then(done, function () { fallback(); });
+    } else {
+      fallback();
+    }
+    function fallback() {
+      el.removeAttribute('readonly');
+      el.select();
+      try { document.execCommand('copy'); done(); } catch (e) {}
+      el.setAttribute('readonly', 'readonly');
+      window.getSelection().removeAllRanges();
+    }
+  }
+</script>
+{% endblock %}
