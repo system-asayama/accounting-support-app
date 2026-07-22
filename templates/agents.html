@@ -1,0 +1,46 @@
+{% extends "base.html" %}
+{% block title %}エージェント一覧{% endblock %}
+{% block content %}
+<div class="card">
+  <h1>AIエージェント</h1>
+  <p class="muted">
+    「エージェント = モデル + システムプロンプト + 利用するMCPサーバー群」です。
+    ここに登録したエージェントへ、<a class="link" href="{{ url_for('broadcast') }}">一斉指示</a>で同じ指示をまとめて送れます。
+  </p>
+  <a href="{{ url_for('agent_new') }}"><button>＋ エージェントを追加</button></a>
+
+  {% if agents %}
+  <div class="table-wrap" style="margin-top:16px;">
+    <table>
+      <thead>
+        <tr><th>名前</th><th>モデル</th><th>MCPサーバー</th><th>状態</th><th>操作</th></tr>
+      </thead>
+      <tbody>
+        {% for a in agents %}
+        <tr>
+          <td class="wrap">{{ a.name }}</td>
+          <td class="muted">{{ a.model }}</td>
+          <td class="muted">{{ a.mcp_servers | length }} 個</td>
+          <td>
+            {% if a.enabled %}<span class="badge success">有効</span>
+            {% else %}<span class="badge off">無効</span>{% endif %}
+          </td>
+          <td>
+            <div class="inline">
+              <a href="{{ url_for('agent_edit', agent_id=a.id) }}"><button class="small secondary" type="button">編集</button></a>
+              <form method="post" action="{{ url_for('agent_delete', agent_id=a.id) }}"
+                    onsubmit="return confirm('「{{ a.name }}」を削除しますか？');">
+                <button class="small danger" type="submit">削除</button>
+              </form>
+            </div>
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% else %}
+  <p class="muted" style="margin-top:16px;">まだエージェントがありません。「＋ エージェントを追加」から登録してください。</p>
+  {% endif %}
+</div>
+{% endblock %}

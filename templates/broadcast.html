@@ -1,0 +1,34 @@
+{% extends "base.html" %}
+{% block title %}一斉指示{% endblock %}
+{% block content %}
+<div class="card">
+  <h1>一斉指示</h1>
+  <p class="muted">
+    1つの指示を、有効な全エージェント（{{ agents | length }} 件）へまとめて送信します。
+    各エージェントは自分のMCPサーバーを使って処理し、結果を一覧表示します。
+  </p>
+
+  {% if agents %}
+  <div style="margin:8px 0 16px;">
+    {% for a in agents %}
+      <span class="badge user" style="margin-right:6px;">{{ a.name }}</span>
+    {% endfor %}
+  </div>
+  <form method="post">
+    <label for="instruction">指示内容</label>
+    <textarea id="instruction" name="instruction" required
+              placeholder="例: 今月の売上サマリを作成して要点を3つに整理してください">{{ instruction }}</textarea>
+    <button type="submit">全エージェントへ送信</button>
+  </form>
+  {% else %}
+  <p class="muted">
+    有効なエージェントがありません。まず
+    <a class="link" href="{{ url_for('agents') }}">エージェント</a>を登録してください。
+  </p>
+  {% endif %}
+
+  <p class="muted" style="margin-top:16px;">
+    <a class="link" href="{{ url_for('broadcast_history') }}">過去の一斉指示の履歴を見る →</a>
+  </p>
+</div>
+{% endblock %}

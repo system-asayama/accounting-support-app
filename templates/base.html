@@ -19,8 +19,21 @@
     .card.narrow { max-width:380px; margin-left:auto; margin-right:auto; }
     h1 { margin-top:0; font-size:22px; }
     label { display:block; margin:12px 0 4px; font-size:14px; color:var(--muted); }
-    input, select { width:100%; padding:10px; border:1px solid #d0d4dd;
-                    border-radius:8px; font-size:15px; }
+    input, select, textarea { width:100%; padding:10px; border:1px solid #d0d4dd;
+                    border-radius:8px; font-size:15px; font-family:inherit; }
+    textarea { resize:vertical; min-height:80px; }
+    button.secondary { background:#e7ecff; color:var(--primary); }
+    .row { display:flex; gap:8px; align-items:flex-start; margin-bottom:8px; }
+    .row > * { margin-top:0; }
+    .result-grid { display:grid; grid-template-columns:repeat(auto-fill, minmax(300px, 1fr)); gap:16px; }
+    .result { border:1px solid #e5e8f0; border-radius:10px; padding:16px; background:#fbfcff; }
+    .result h3 { margin:0 0 8px; font-size:16px; }
+    .result pre { white-space:pre-wrap; word-break:break-word; font-size:13px;
+                  background:#fff; border:1px solid #eee; border-radius:8px; padding:10px; margin:8px 0 0; }
+    .badge.success { background:#e6fcf5; color:#0c8599; }
+    .badge.error { background:#fff0f0; color:#c92a2a; }
+    .badge.tool { background:#f3f0ff; color:#6741d9; margin-right:4px; }
+    .badge.off { background:#f1f3f5; color:#868e96; }
     button { cursor:pointer; border:none; border-radius:8px; padding:10px 16px;
              font-size:15px; background:var(--primary); color:#fff; margin-top:16px; }
     button.danger { background:var(--danger); margin-top:0; }
@@ -47,6 +60,8 @@
     <nav>
       {% if current_user %}
         <a href="{{ url_for('dashboard') }}">ダッシュボード</a>
+        <a href="{{ url_for('broadcast') }}">一斉指示</a>
+        <a href="{{ url_for('agents') }}">エージェント</a>
         {% if current_user.is_admin %}<a href="{{ url_for('admin_users') }}">ユーザー管理</a>{% endif %}
         {% if current_user.is_admin %}<a href="{{ url_for('admin_settings') }}">管理者設定</a>
         {% else %}<a href="{{ url_for('settings') }}">アカウント設定</a>{% endif %}

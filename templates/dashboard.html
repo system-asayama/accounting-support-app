@@ -14,4 +14,16 @@
     <p class="muted">あなたは利用者です。一般ユーザー向けの機能を利用できます。</p>
   {% endif %}
 </div>
+
+<div class="card">
+  <h1>🤖 MCP連携AIへの一斉指示</h1>
+  <p class="muted">
+    登録した複数のAIエージェント（モデル・システムプロンプト・MCPサーバーの組み合わせ）へ、
+    同じ指示をまとめて送り、結果を一覧で比較できます。
+  </p>
+  <div class="inline">
+    <a href="{{ url_for('broadcast') }}"><button>一斉指示を送る</button></a>
+    <a href="{{ url_for('agents') }}"><button type="button" class="secondary">エージェントを管理</button></a>
+  </div>
+</div>
 {% endblock %}

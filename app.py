@@ -5,6 +5,7 @@
 - admin / user のロールによるアクセス制御
 - 管理者はユーザー一覧・作成・ロール変更・削除が可能
 """
+import json
 import os
 from functools import wraps
 
@@ -18,7 +19,18 @@ from flask import (
     url_for,
 )
 
-from models import ROLE_ADMIN, ROLE_USER, ROLES, User, db
+from broadcast_service import BroadcastError, run_broadcast
+from models import (
+    DEFAULT_MODEL,
+    ROLE_ADMIN,
+    ROLE_USER,
+    ROLES,
+    Agent,
+    Broadcast,
+    BroadcastResult,
+    User,
+    db,
+)
 
 
 def _normalize_db_url(url: str) -> str:
@@ -346,6 +358,196 @@ def _register_routes(app: Flask) -> None:
         db.session.commit()
         flash(f"ユーザー「{user.username}」を削除しました。", "success")
         return redirect(url_for("admin_users"))
+
+
+    # --- 一斉指示（MCP連携AIへのブロードキャスト） ----------------------
+    @app.route("/agents")
+    @login_required
+    def agents():
+        """登録済みエージェントの一覧。"""
+        all_agents = Agent.query.order_by(Agent.created_at.asc()).all()
+        return render_template("agents.html", agents=all_agents)
+
+    @app.route("/agents/new", methods=["GET", "POST"])
+    @login_required
+    def agent_new():
+        """エージェントを新規登録する。"""
+        if request.method == "POST":
+            error = _save_agent_from_form(None)
+            if error is None:
+                flash("エージェントを登録しました。", "success")
+                return redirect(url_for("agents"))
+            flash(error, "error")
+            return render_template(
+                "agent_form.html",
+                agent=None,
+                default_model=DEFAULT_MODEL,
+                form=request.form,
+            )
+        return render_template(
+            "agent_form.html", agent=None, default_model=DEFAULT_MODEL, form=None
+        )
+
+    @app.route("/agents/<int:agent_id>/edit", methods=["GET", "POST"])
+    @login_required
+    def agent_edit(agent_id):
+        """エージェントを編集する。"""
+        agent = db.session.get(Agent, agent_id)
+        if agent is None:
+            flash("エージェントが見つかりません。", "error")
+            return redirect(url_for("agents"))
+
+        if request.method == "POST":
+            error = _save_agent_from_form(agent)
+            if error is None:
+                flash("エージェントを更新しました。", "success")
+                return redirect(url_for("agents"))
+            flash(error, "error")
+            return render_template(
+                "agent_form.html",
+                agent=agent,
+                default_model=DEFAULT_MODEL,
+                form=request.form,
+            )
+        return render_template(
+            "agent_form.html", agent=agent, default_model=DEFAULT_MODEL, form=None
+        )
+
+    @app.route("/agents/<int:agent_id>/delete", methods=["POST"])
+    @login_required
+    def agent_delete(agent_id):
+        agent = db.session.get(Agent, agent_id)
+        if agent is None:
+            flash("エージェントが見つかりません。", "error")
+            return redirect(url_for("agents"))
+        db.session.delete(agent)
+        db.session.commit()
+        flash(f"エージェント「{agent.name}」を削除しました。", "success")
+        return redirect(url_for("agents"))
+
+    @app.route("/broadcast", methods=["GET", "POST"])
+    @login_required
+    def broadcast():
+        """指示を入力し、有効な全エージェントへ一斉送信して結果を表示する。"""
+        enabled_agents = (
+            Agent.query.filter_by(enabled=True)
+            .order_by(Agent.created_at.asc())
+            .all()
+        )
+
+        if request.method == "POST":
+            instruction = (request.form.get("instruction") or "").strip()
+            if not instruction:
+                flash("指示内容を入力してください。", "error")
+            elif not enabled_agents:
+                flash("有効なエージェントがありません。先に登録してください。", "error")
+            else:
+                try:
+                    results = run_broadcast(instruction, enabled_agents)
+                except BroadcastError as exc:
+                    flash(str(exc), "error")
+                    return render_template(
+                        "broadcast.html",
+                        agents=enabled_agents,
+                        instruction=instruction,
+                    )
+
+                record = Broadcast(
+                    instruction=instruction,
+                    created_by=(current_user().username if current_user() else None),
+                )
+                db.session.add(record)
+                db.session.flush()  # record.id を確定
+                for r in results:
+                    db.session.add(
+                        BroadcastResult(
+                            broadcast_id=record.id,
+                            agent_name=r["agent_name"],
+                            model=r.get("model"),
+                            status=r["status"],
+                            response=r.get("response"),
+                            tools_used_json=json.dumps(
+                                r.get("tools_used") or [], ensure_ascii=False
+                            ),
+                            error=r.get("error"),
+                        )
+                    )
+                db.session.commit()
+                flash("一斉送信が完了しました。", "success")
+                return redirect(url_for("broadcast_detail", broadcast_id=record.id))
+
+        return render_template("broadcast.html", agents=enabled_agents, instruction="")
+
+    @app.route("/broadcast/history")
+    @login_required
+    def broadcast_history():
+        records = Broadcast.query.order_by(Broadcast.created_at.desc()).all()
+        return render_template("broadcast_history.html", broadcasts=records)
+
+    @app.route("/broadcast/<int:broadcast_id>")
+    @login_required
+    def broadcast_detail(broadcast_id):
+        record = db.session.get(Broadcast, broadcast_id)
+        if record is None:
+            flash("履歴が見つかりません。", "error")
+            return redirect(url_for("broadcast_history"))
+        return render_template("broadcast_detail.html", broadcast=record)
+
+
+def _save_agent_from_form(agent):
+    """フォーム内容から Agent を作成/更新する。成功で None、失敗でエラーメッセージ。"""
+    name = (request.form.get("name") or "").strip()
+    model = (request.form.get("model") or "").strip() or DEFAULT_MODEL
+    system_prompt = (request.form.get("system_prompt") or "").strip() or None
+    max_tokens_raw = (request.form.get("max_tokens") or "").strip()
+    enabled = request.form.get("enabled") == "on"
+
+    if not name:
+        return "エージェント名を入力してください。"
+
+    # 名前の重複チェック（自分自身は除外）
+    existing = Agent.query.filter_by(name=name).first()
+    if existing is not None and (agent is None or existing.id != agent.id):
+        return "そのエージェント名は既に使われています。"
+
+    try:
+        max_tokens = int(max_tokens_raw) if max_tokens_raw else 2048
+        if max_tokens <= 0:
+            raise ValueError
+    except ValueError:
+        return "最大トークン数は正の整数で入力してください。"
+
+    # MCPサーバーは name / url / token の3列を行ごとに受け取る
+    names = request.form.getlist("mcp_name")
+    urls = request.form.getlist("mcp_url")
+    tokens = request.form.getlist("mcp_token")
+    servers = []
+    for i in range(len(urls)):
+        url = (urls[i] or "").strip()
+        if not url:
+            continue
+        servers.append(
+            {
+                "name": (names[i] if i < len(names) else "").strip() or "mcp",
+                "url": url,
+                "authorization_token": (
+                    tokens[i] if i < len(tokens) else ""
+                ).strip(),
+            }
+        )
+
+    if agent is None:
+        agent = Agent(name=name)
+        db.session.add(agent)
+
+    agent.name = name
+    agent.model = model
+    agent.system_prompt = system_prompt
+    agent.max_tokens = max_tokens
+    agent.enabled = enabled
+    agent.mcp_servers = servers
+    db.session.commit()
+    return None
 
 
 def _admin_count() -> int:

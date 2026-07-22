@@ -1,0 +1,71 @@
+{% extends "base.html" %}
+{% block title %}{% if agent %}エージェント編集{% else %}エージェント追加{% endif %}{% endblock %}
+{% block content %}
+{% set src = form or agent %}
+<div class="card">
+  <h1>{% if agent %}エージェントを編集{% else %}エージェントを追加{% endif %}</h1>
+  <form method="post">
+    <label for="name">エージェント名</label>
+    <input id="name" name="name" required
+           value="{{ (form.name if form else agent.name) or '' }}">
+
+    <label for="model">モデル</label>
+    <input id="model" name="model"
+           value="{{ (form.model if form else (agent.model if agent else '')) or default_model }}">
+    <p class="muted">例: {{ default_model }} / claude-opus-4-8 / claude-haiku-4-5-20251001</p>
+
+    <label for="system_prompt">システムプロンプト（任意）</label>
+    <textarea id="system_prompt" name="system_prompt"
+              placeholder="このエージェントの役割・口調・制約など">{{ (form.system_prompt if form else (agent.system_prompt if agent else '')) or '' }}</textarea>
+
+    <label for="max_tokens">最大トークン数</label>
+    <input id="max_tokens" name="max_tokens" type="number" min="1"
+           value="{{ (form.max_tokens if form else (agent.max_tokens if agent else '')) or 2048 }}">
+
+    <label>MCPサーバー（任意・複数可）</label>
+    <p class="muted">リモートMCPサーバーのURLを登録すると、このエージェントが指示実行中に各ツールを利用できます。</p>
+    <div id="mcp-list">
+      {% set servers = (agent.mcp_servers if agent else []) %}
+      {% if servers %}
+        {% for s in servers %}
+        <div class="row mcp-row">
+          <input name="mcp_name" placeholder="名前" value="{{ s.name or '' }}" style="flex:1;">
+          <input name="mcp_url" placeholder="https://... (MCPサーバーURL)" value="{{ s.url or '' }}" style="flex:2;">
+          <input name="mcp_token" placeholder="認証トークン(任意)" value="{{ s.authorization_token or '' }}" style="flex:2;">
+          <button type="button" class="small danger" onclick="this.closest('.mcp-row').remove()">×</button>
+        </div>
+        {% endfor %}
+      {% endif %}
+    </div>
+    <button type="button" class="secondary small" onclick="addMcpRow()">＋ MCPサーバーを追加</button>
+
+    <div style="margin-top:16px;">
+      <label class="inline" style="display:inline-flex; gap:8px; align-items:center;">
+        <input type="checkbox" name="enabled" style="width:auto;"
+               {% if not agent or agent.enabled %}checked{% endif %}>
+        一斉指示の対象にする（有効）
+      </label>
+    </div>
+
+    <div class="inline" style="margin-top:16px;">
+      <button type="submit">{% if agent %}更新する{% else %}登録する{% endif %}</button>
+      <a href="{{ url_for('agents') }}"><button type="button" class="secondary">戻る</button></a>
+    </div>
+  </form>
+</div>
+
+<template id="mcp-row-template">
+  <div class="row mcp-row">
+    <input name="mcp_name" placeholder="名前" style="flex:1;">
+    <input name="mcp_url" placeholder="https://... (MCPサーバーURL)" style="flex:2;">
+    <input name="mcp_token" placeholder="認証トークン(任意)" style="flex:2;">
+    <button type="button" class="small danger" onclick="this.closest('.mcp-row').remove()">×</button>
+  </div>
+</template>
+<script>
+  function addMcpRow() {
+    var tpl = document.getElementById('mcp-row-template');
+    document.getElementById('mcp-list').appendChild(tpl.content.cloneNode(true));
+  }
+</script>
+{% endblock %}

@@ -1,10 +1,14 @@
 """データベースモデル定義。"""
+import json
 from datetime import datetime
 
 from flask_sqlalchemy import SQLAlchemy
 from werkzeug.security import check_password_hash, generate_password_hash
 
 db = SQLAlchemy()
+
+# 一斉指示のデフォルトモデル
+DEFAULT_MODEL = "claude-sonnet-5"
 
 # 利用可能なロール（権限）
 ROLE_ADMIN = "admin"
@@ -35,3 +39,83 @@ class User(db.Model):
 
     def __repr__(self) -> str:  # pragma: no cover - デバッグ用
         return f"<User {self.username} ({self.role})>"
+
+
+class Agent(db.Model):
+    """一斉指示の宛先となるAIエージェント。
+
+    「エージェント = モデル + システムプロンプト + 利用するMCPサーバー群」として登録し、
+    1つの指示を登録済みの全エージェントへファンアウトする。
+    """
+
+    __tablename__ = "agents"
+
+    id = db.Column(db.Integer, primary_key=True)
+    name = db.Column(db.String(80), unique=True, nullable=False)
+    model = db.Column(db.String(80), nullable=False, default=DEFAULT_MODEL)
+    system_prompt = db.Column(db.Text, nullable=True)
+    # MCPサーバー群を JSON 文字列で保持: [{"name","url","authorization_token"}]
+    mcp_servers_json = db.Column(db.Text, nullable=False, default="[]")
+    max_tokens = db.Column(db.Integer, nullable=False, default=2048)
+    enabled = db.Column(db.Boolean, nullable=False, default=True)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
+
+    @property
+    def mcp_servers(self) -> list:
+        try:
+            data = json.loads(self.mcp_servers_json or "[]")
+            return data if isinstance(data, list) else []
+        except (ValueError, TypeError):
+            return []
+
+    @mcp_servers.setter
+    def mcp_servers(self, value) -> None:
+        self.mcp_servers_json = json.dumps(value or [], ensure_ascii=False)
+
+    def __repr__(self) -> str:  # pragma: no cover - デバッグ用
+        return f"<Agent {self.name} ({self.model})>"
+
+
+class Broadcast(db.Model):
+    """1回の一斉指示（指示文と、その実行結果の集合）。"""
+
+    __tablename__ = "broadcasts"
+
+    id = db.Column(db.Integer, primary_key=True)
+    instruction = db.Column(db.Text, nullable=False)
+    created_by = db.Column(db.String(80), nullable=True)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
+
+    results = db.relationship(
+        "BroadcastResult",
+        backref="broadcast",
+        cascade="all, delete-orphan",
+        order_by="BroadcastResult.id",
+    )
+
+
+class BroadcastResult(db.Model):
+    """一斉指示に対する、エージェント1件分の応答結果。"""
+
+    __tablename__ = "broadcast_results"
+
+    id = db.Column(db.Integer, primary_key=True)
+    broadcast_id = db.Column(
+        db.Integer, db.ForeignKey("broadcasts.id"), nullable=False
+    )
+    # エージェントは後で削除されうるので名前をスナップショットとして保持
+    agent_name = db.Column(db.String(80), nullable=False)
+    model = db.Column(db.String(80), nullable=True)
+    status = db.Column(db.String(20), nullable=False, default="success")  # success / error
+    response = db.Column(db.Text, nullable=True)
+    tools_used_json = db.Column(db.Text, nullable=True)  # 使用したMCPツール名の JSON 配列
+    error = db.Column(db.Text, nullable=True)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
+
+    @property
+    def tools_used(self) -> list:
+        try:
+            data = json.loads(self.tools_used_json or "[]")
+            return data if isinstance(data, list) else []
+        except (ValueError, TypeError):
+            return []

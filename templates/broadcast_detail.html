@@ -1,0 +1,40 @@
+{% extends "base.html" %}
+{% block title %}一斉指示の結果{% endblock %}
+{% block content %}
+<div class="card">
+  <h1>一斉指示の結果</h1>
+  <p class="muted">{{ broadcast.created_at.strftime('%Y-%m-%d %H:%M') }}
+    {% if broadcast.created_by %}・{{ broadcast.created_by }}{% endif %}</p>
+  <label>指示内容</label>
+  <pre style="white-space:pre-wrap; word-break:break-word; background:#f8f9fc; border:1px solid #eee; border-radius:8px; padding:12px;">{{ broadcast.instruction }}</pre>
+  <div class="inline" style="margin-top:12px;">
+    <a href="{{ url_for('broadcast') }}"><button type="button">新しい一斉指示</button></a>
+    <a href="{{ url_for('broadcast_history') }}"><button type="button" class="secondary">履歴一覧</button></a>
+  </div>
+</div>
+
+<div class="card">
+  <h1>各エージェントの応答（{{ broadcast.results | length }} 件）</h1>
+  <div class="result-grid">
+    {% for r in broadcast.results %}
+    <div class="result">
+      <h3>{{ r.agent_name }}
+        {% if r.status == 'success' %}<span class="badge success">成功</span>
+        {% else %}<span class="badge error">エラー</span>{% endif %}
+      </h3>
+      <p class="muted" style="margin:0;">{{ r.model or '' }}</p>
+      {% if r.tools_used %}
+      <p style="margin:8px 0 0;">
+        {% for t in r.tools_used %}<span class="badge tool">🔧 {{ t }}</span>{% endfor %}
+      </p>
+      {% endif %}
+      {% if r.status == 'success' %}
+        <pre>{{ r.response }}</pre>
+      {% else %}
+        <pre style="color:#c92a2a;">{{ r.error }}</pre>
+      {% endif %}
+    </div>
+    {% endfor %}
+  </div>
+</div>
+{% endblock %}

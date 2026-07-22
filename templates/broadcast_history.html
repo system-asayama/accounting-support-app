@@ -1,0 +1,31 @@
+{% extends "base.html" %}
+{% block title %}一斉指示の履歴{% endblock %}
+{% block content %}
+<div class="card">
+  <h1>一斉指示の履歴</h1>
+  <a href="{{ url_for('broadcast') }}"><button>＋ 新しい一斉指示</button></a>
+
+  {% if broadcasts %}
+  <div class="table-wrap" style="margin-top:16px;">
+    <table>
+      <thead>
+        <tr><th>日時</th><th>指示（先頭）</th><th>宛先数</th><th>実行者</th><th></th></tr>
+      </thead>
+      <tbody>
+        {% for b in broadcasts %}
+        <tr>
+          <td class="muted">{{ b.created_at.strftime('%Y-%m-%d %H:%M') }}</td>
+          <td class="wrap">{{ b.instruction[:60] }}{% if b.instruction | length > 60 %}…{% endif %}</td>
+          <td class="muted">{{ b.results | length }}</td>
+          <td class="muted">{{ b.created_by or '-' }}</td>
+          <td><a class="link" href="{{ url_for('broadcast_detail', broadcast_id=b.id) }}">結果を見る →</a></td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% else %}
+  <p class="muted" style="margin-top:16px;">まだ履歴がありません。</p>
+  {% endif %}
+</div>
+{% endblock %}
