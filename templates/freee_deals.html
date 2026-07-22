@@ -1,0 +1,77 @@
+{% extends "base.html" %}
+{% block title %}取引データ{% endblock %}
+{% block content %}
+<div class="card">
+  <h1>取引データ（freee）</h1>
+  <p class="muted">
+    事業所: <strong>{{ conn.company_name }}</strong>（ID: {{ conn.company_id }}）
+    ・<a class="link" href="{{ url_for('freee_companies') }}">事業所を変更</a>
+  </p>
+
+  <form method="get" action="{{ url_for('freee_deals') }}">
+    <div class="row" style="flex-wrap:wrap; align-items:flex-end;">
+      <div style="flex:1; min-width:140px;">
+        <label for="start">発生日（開始）</label>
+        <input id="start" name="start" type="date" value="{{ start }}">
+      </div>
+      <div style="flex:1; min-width:140px;">
+        <label for="end">発生日（終了）</label>
+        <input id="end" name="end" type="date" value="{{ end }}">
+      </div>
+      <div style="flex:1; min-width:140px;">
+        <label for="type">収支区分</label>
+        <select id="type" name="type">
+          <option value="" {% if not deal_type %}selected{% endif %}>すべて</option>
+          <option value="income" {% if deal_type == 'income' %}selected{% endif %}>収入</option>
+          <option value="expense" {% if deal_type == 'expense' %}selected{% endif %}>支出</option>
+        </select>
+      </div>
+      <div><button type="submit">絞り込む</button></div>
+    </div>
+  </form>
+</div>
+
+{% if error %}
+<div class="card"><p class="flash error" style="margin:0;">{{ error }}</p></div>
+{% else %}
+<div class="card">
+  <h1>取引一覧 <span class="muted" style="font-size:14px;">（該当 {{ total }} 件・最新 {{ deals | length }} 件表示）</span></h1>
+  {% if deals %}
+  <div class="table-wrap">
+    <table>
+      <thead>
+        <tr>
+          <th>発生日</th><th>区分</th><th>取引先</th>
+          <th style="text-align:right;">金額</th><th>決済</th><th>勘定科目（明細）</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for d in deals %}
+        <tr>
+          <td class="muted">{{ d.issue_date }}</td>
+          <td>
+            {% if d.type == 'income' %}<span class="badge success">収入</span>
+            {% else %}<span class="badge error">支出</span>{% endif %}
+          </td>
+          <td class="wrap">{{ partner_map.get(d.partner_id, '') or d.partner_id or '-' }}</td>
+          <td style="text-align:right;">¥{{ '{:,}'.format(d.amount) }}</td>
+          <td>
+            {% if d.status == 'settled' %}<span class="badge user">完了</span>
+            {% else %}<span class="badge off">未決済</span>{% endif %}
+          </td>
+          <td class="wrap muted">
+            {% for det in d.details or [] %}
+              {{ account_map.get(det.account_item_id, det.account_item_id) }}{% if not loop.last %} / {% endif %}
+            {% endfor %}
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% else %}
+  <p class="muted">該当する取引がありません。期間や区分を変えてお試しください。</p>
+  {% endif %}
+</div>
+{% endif %}
+{% endblock %}

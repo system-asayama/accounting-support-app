@@ -11,6 +11,9 @@ services:
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
       GEMINI_API_KEY: ${GEMINI_API_KEY:-}
+      FREEE_CLIENT_ID: ${FREEE_CLIENT_ID:-}
+      FREEE_CLIENT_SECRET: ${FREEE_CLIENT_SECRET:-}
+      FREEE_REDIRECT_URI: ${FREEE_REDIRECT_URI:-}
     depends_on:
       - db
     restart: unless-stopped

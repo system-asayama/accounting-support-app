@@ -1,0 +1,35 @@
+{% extends "base.html" %}
+{% block title %}事業所の選択{% endblock %}
+{% block content %}
+<div class="card">
+  <h1>事業所の選択</h1>
+  <p class="muted">データを取得する事業所を選んでください（{{ companies | length }} 件）。</p>
+
+  <div class="table-wrap">
+    <table>
+      <thead>
+        <tr><th>ID</th><th>事業所名</th><th>役割</th><th></th></tr>
+      </thead>
+      <tbody>
+        {% for c in companies %}
+        <tr>
+          <td class="muted">{{ c.id }}</td>
+          <td class="wrap">
+            {{ c.display_name or c.name or '(名称未設定)' }}
+            {% if conn.company_id == c.id %}<span class="badge success">選択中</span>{% endif %}
+          </td>
+          <td class="muted">{{ c.role or '' }}</td>
+          <td>
+            <form method="post" action="{{ url_for('freee_select_company') }}">
+              <input type="hidden" name="company_id" value="{{ c.id }}">
+              <input type="hidden" name="company_name" value="{{ c.display_name or c.name or '' }}">
+              <button class="small" type="submit">選択</button>
+            </form>
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% endblock %}

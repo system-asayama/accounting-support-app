@@ -19,6 +19,7 @@ from flask import (
     url_for,
 )
 
+import freee_client
 from broadcast_service import BroadcastError, run_broadcast
 from models import (
     DEFAULT_MODEL,
@@ -31,6 +32,7 @@ from models import (
     Agent,
     Broadcast,
     BroadcastResult,
+    FreeeConnection,
     User,
     db,
 )
@@ -526,6 +528,163 @@ def _register_routes(app: Flask) -> None:
             flash("履歴が見つかりません。", "error")
             return redirect(url_for("broadcast_history"))
         return render_template("broadcast_detail.html", broadcast=record)
+
+
+    # --- freee 連携 ------------------------------------------------------
+    @app.route("/freee")
+    @login_required
+    def freee_status():
+        conn = FreeeConnection.get()
+        return render_template(
+            "freee_status.html",
+            conn=conn,
+            configured=freee_client.is_configured(),
+            redirect_uri=freee_client.get_config()["redirect_uri"],
+            oob=freee_client.OOB_REDIRECT,
+        )
+
+    @app.route("/freee/oauth/start")
+    @login_required
+    def freee_oauth_start():
+        try:
+            return redirect(freee_client.authorize_url())
+        except freee_client.FreeeError as exc:
+            flash(str(exc), "error")
+            return redirect(url_for("freee_status"))
+
+    @app.route("/freee/oauth/callback")
+    @login_required
+    def freee_oauth_callback():
+        """登録済みリダイレクトURIに戻ってきたときのコールバック。"""
+        code = request.args.get("code")
+        error = request.args.get("error")
+        if error:
+            flash(f"freee 認証がキャンセル/失敗しました: {error}", "error")
+            return redirect(url_for("freee_status"))
+        if not code:
+            flash("認可コードが取得できませんでした。", "error")
+            return redirect(url_for("freee_status"))
+        return _do_exchange(code)
+
+    @app.route("/freee/oauth/code", methods=["POST"])
+    @login_required
+    def freee_oauth_code():
+        """OOB で画面表示された認可コードを貼り付けて交換する。"""
+        code = (request.form.get("code") or "").strip()
+        if not code:
+            flash("認可コードを入力してください。", "error")
+            return redirect(url_for("freee_status"))
+        return _do_exchange(code)
+
+    def _do_exchange(code):
+        try:
+            freee_client.exchange_code(code)
+            flash("freee と連携しました。事業所を選択してください。", "success")
+            return redirect(url_for("freee_companies"))
+        except freee_client.FreeeError as exc:
+            flash(str(exc), "error")
+            return redirect(url_for("freee_status"))
+
+    @app.route("/freee/token", methods=["POST"])
+    @login_required
+    def freee_token():
+        """（簡易）アクセストークンを直接保存する。"""
+        access_token = (request.form.get("access_token") or "").strip()
+        refresh_tok = (request.form.get("refresh_token") or "").strip()
+        if not access_token:
+            flash("アクセストークンを入力してください。", "error")
+            return redirect(url_for("freee_status"))
+        freee_client.save_manual_token(access_token, refresh_tok)
+        flash("アクセストークンを保存しました。", "success")
+        return redirect(url_for("freee_companies"))
+
+    @app.route("/freee/disconnect", methods=["POST"])
+    @login_required
+    def freee_disconnect():
+        freee_client.disconnect()
+        flash("freee 連携を解除しました。", "success")
+        return redirect(url_for("freee_status"))
+
+    @app.route("/freee/companies")
+    @login_required
+    def freee_companies():
+        conn = FreeeConnection.get()
+        if not conn.is_connected:
+            flash("先に freee と連携してください。", "error")
+            return redirect(url_for("freee_status"))
+        try:
+            companies = freee_client.list_companies(conn)
+        except freee_client.FreeeError as exc:
+            flash(str(exc), "error")
+            return redirect(url_for("freee_status"))
+        return render_template("freee_companies.html", conn=conn, companies=companies)
+
+    @app.route("/freee/select-company", methods=["POST"])
+    @login_required
+    def freee_select_company():
+        conn = FreeeConnection.get()
+        company_id = request.form.get("company_id")
+        company_name = request.form.get("company_name") or ""
+        if not company_id:
+            flash("事業所を選択してください。", "error")
+            return redirect(url_for("freee_companies"))
+        conn.company_id = int(company_id)
+        conn.company_name = company_name
+        db.session.commit()
+        flash(f"事業所「{company_name}」を選択しました。", "success")
+        return redirect(url_for("freee_deals"))
+
+    @app.route("/freee/deals")
+    @login_required
+    def freee_deals():
+        conn = FreeeConnection.get()
+        if not conn.is_connected:
+            flash("先に freee と連携してください。", "error")
+            return redirect(url_for("freee_status"))
+        if not conn.company_id:
+            flash("先に事業所を選択してください。", "error")
+            return redirect(url_for("freee_companies"))
+
+        start = (request.args.get("start") or "").strip()
+        end = (request.args.get("end") or "").strip()
+        deal_type = (request.args.get("type") or "").strip()
+
+        deals, total, account_map, partner_map, error = [], 0, {}, {}, None
+        try:
+            result = freee_client.list_deals(
+                conn,
+                conn.company_id,
+                start_issue_date=start,
+                end_issue_date=end,
+                type=deal_type,
+                limit=100,
+            )
+            deals = result.get("deals", [])
+            total = (result.get("meta") or {}).get("total_count", len(deals))
+            # 勘定科目・取引先のID→名称マップ（明細を人間が読める形にする）
+            account_map = {
+                a["id"]: a.get("name", "")
+                for a in freee_client.list_account_items(conn, conn.company_id)
+            }
+            partner_map = {
+                p["id"]: p.get("name", "")
+                for p in freee_client.list_partners(conn, conn.company_id)
+            }
+        except freee_client.FreeeError as exc:
+            error = str(exc)
+
+        return render_template(
+            "freee_deals.html",
+            conn=conn,
+            deals=deals,
+            total=total,
+            account_map=account_map,
+            partner_map=partner_map,
+            start=start,
+            end=end,
+            deal_type=deal_type,
+            error=error,
+        )
 
 
 def _save_agent_from_form(agent):

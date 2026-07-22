@@ -1,0 +1,80 @@
+{% extends "base.html" %}
+{% block title %}freee連携{% endblock %}
+{% block content %}
+<div class="card">
+  <h1>freee 連携</h1>
+
+  {% if conn.is_connected %}
+    <p>
+      状態:
+      {% if conn.is_expired %}<span class="badge error">トークン期限切れ</span>
+      {% else %}<span class="badge success">連携済み</span>{% endif %}
+    </p>
+    {% if conn.company_name %}
+      <p class="muted">選択中の事業所: <strong>{{ conn.company_name }}</strong>（ID: {{ conn.company_id }}）</p>
+    {% else %}
+      <p class="muted">まだ事業所が選択されていません。</p>
+    {% endif %}
+    <div class="inline">
+      <a href="{{ url_for('freee_companies') }}"><button type="button">事業所を選ぶ</button></a>
+      {% if conn.company_id %}
+        <a href="{{ url_for('freee_deals') }}"><button type="button" class="secondary">取引データを見る</button></a>
+      {% endif %}
+      <form method="post" action="{{ url_for('freee_disconnect') }}"
+            onsubmit="return confirm('freee 連携を解除しますか？');">
+        <button class="danger small" type="submit">連携解除</button>
+      </form>
+    </div>
+  {% else %}
+    <p><span class="badge off">未連携</span></p>
+  {% endif %}
+</div>
+
+<div class="card">
+  <h1>接続方法</h1>
+  {% if configured %}
+    <p class="muted">
+      freee アプリ（クライアントID/シークレット）が設定されています。
+      下のボタンから freee にログインして認可してください。
+    </p>
+    <a href="{{ url_for('freee_oauth_start') }}"><button>freee で認可する</button></a>
+
+    {% if redirect_uri == oob %}
+    <hr style="margin:20px 0; border:none; border-top:1px solid #eee;">
+    <p class="muted">
+      リダイレクトURIが <code>OOB</code> の場合、認可後に画面表示される<strong>認可コード</strong>を貼り付けてください。
+    </p>
+    <form method="post" action="{{ url_for('freee_oauth_code') }}">
+      <label for="code">認可コード</label>
+      <input id="code" name="code" placeholder="freee 認可後に表示されたコード">
+      <button type="submit">コードを送信して連携</button>
+    </form>
+    {% else %}
+    <p class="muted" style="margin-top:12px;">
+      登録済みリダイレクトURI: <code>{{ redirect_uri }}</code>
+    </p>
+    {% endif %}
+  {% else %}
+    <p class="muted">
+      環境変数 <code>FREEE_CLIENT_ID</code> / <code>FREEE_CLIENT_SECRET</code> が未設定です。<br>
+      <a class="link" href="https://app.secure.freee.co.jp/developers/applications" target="_blank" rel="noopener">freee アプリ管理</a>
+      でアプリを登録し、これらを設定すると OAuth 連携が使えます。
+      （リダイレクトURIは <code>FREEE_REDIRECT_URI</code>、未設定時は OOB を使用）
+    </p>
+  {% endif %}
+</div>
+
+<div class="card">
+  <h1>アクセストークンを直接入力（簡易）</h1>
+  <p class="muted">
+    すでにアクセストークンをお持ちの場合は、ここに貼り付けて連携できます（有効期限は約24時間）。
+  </p>
+  <form method="post" action="{{ url_for('freee_token') }}">
+    <label for="access_token">アクセストークン</label>
+    <input id="access_token" name="access_token" required>
+    <label for="refresh_token">リフレッシュトークン（任意）</label>
+    <input id="refresh_token" name="refresh_token">
+    <button type="submit">保存して連携</button>
+  </form>
+</div>
+{% endblock %}

@@ -143,3 +143,43 @@ class BroadcastResult(db.Model):
             return data if isinstance(data, list) else []
         except (ValueError, TypeError):
             return []
+
+
+class FreeeConnection(db.Model):
+    """freee API との接続情報（トークン・選択中の事業所）。
+
+    アプリ全体で1件だけ持つシングルトン的なレコード（id=1）として扱う。
+    """
+
+    __tablename__ = "freee_connections"
+
+    id = db.Column(db.Integer, primary_key=True)
+    access_token = db.Column(db.Text, nullable=True)
+    refresh_token = db.Column(db.Text, nullable=True)
+    token_expires_at = db.Column(db.DateTime, nullable=True)
+    # 選択中の事業所
+    company_id = db.Column(db.Integer, nullable=True)
+    company_name = db.Column(db.String(255), nullable=True)
+    updated_at = db.Column(
+        db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False
+    )
+
+    @property
+    def is_connected(self) -> bool:
+        return bool(self.access_token)
+
+    @property
+    def is_expired(self) -> bool:
+        if not self.token_expires_at:
+            return False
+        return datetime.utcnow() >= self.token_expires_at
+
+    @classmethod
+    def get(cls) -> "FreeeConnection":
+        """唯一の接続レコードを取得（無ければ作成）する。"""
+        conn = db.session.get(cls, 1)
+        if conn is None:
+            conn = cls(id=1)
+            db.session.add(conn)
+            db.session.commit()
+        return conn

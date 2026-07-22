@@ -23,6 +23,30 @@ Flask + SQLAlchemy アプリです。
   - ユーザー削除
   - ※最後の管理者は削除・降格できない安全装置付き
 
+### freee 連携（会計データの取得）
+freee 会計 API と OAuth2 連携し、事業所の取引（仕訳）データを取得・表示します。
+「複数AIで仕訳チェック」を行う前の土台となる、データ取得の仕組みです。
+
+- **連携** (`/freee`)
+  - OAuth2 認可コードフロー。リダイレクトURIを登録できない環境向けに **OOB**（コード貼り付け）にも対応
+  - すでにアクセストークンがある場合は直接貼り付けても連携可能（簡易）
+  - アクセストークン期限切れ時はリフレッシュトークンで自動更新
+- **事業所選択** (`/freee/companies`)
+  - 連携アカウントで参照できる事業所一覧から対象を選択
+- **取引データ** (`/freee/deals`)
+  - 発生日・収支区分で絞り込んで取引一覧を表示
+  - 勘定科目ID・取引先IDは名称に変換して表示（明細も表示）
+
+必要な環境変数（OAuth を使う場合）:
+
+| 変数 | 説明 |
+| --- | --- |
+| `FREEE_CLIENT_ID` | freee アプリのクライアントID |
+| `FREEE_CLIENT_SECRET` | freee アプリのクライアントシークレット |
+| `FREEE_REDIRECT_URI` | リダイレクトURI（未設定時は OOB を使用） |
+
+> freee アプリは [freee アプリ管理](https://app.secure.freee.co.jp/developers/applications) で登録します。
+
 ### MCP連携AIへの一斉指示（マルチプロバイダ・ブロードキャスト）
 1つの指示を、**Claude / ChatGPT / Gemini** を横断して複数AIへまとめて送り、
 結果を横並びで比較できます。例えば freee をそれぞれの AI に MCP 連携しておき、
@@ -96,3 +120,6 @@ python app.py
 | `ANTHROPIC_API_KEY` | Claude (Anthropic) エージェントの実行に必要な API キー |
 | `OPENAI_API_KEY` | ChatGPT (OpenAI) エージェントの実行に必要な API キー |
 | `GEMINI_API_KEY` | Gemini (Google) エージェントの実行に必要な API キー（`GOOGLE_API_KEY` でも可） |
+| `FREEE_CLIENT_ID` | freee アプリのクライアントID（freee OAuth連携用） |
+| `FREEE_CLIENT_SECRET` | freee アプリのクライアントシークレット |
+| `FREEE_REDIRECT_URI` | freee リダイレクトURI（未設定時は OOB を使用） |
