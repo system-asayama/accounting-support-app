@@ -22,6 +22,9 @@ from flask import (
 from broadcast_service import BroadcastError, run_broadcast
 from models import (
     DEFAULT_MODEL,
+    PROVIDER_DEFAULT_MODEL,
+    PROVIDER_LABELS,
+    PROVIDERS,
     ROLE_ADMIN,
     ROLE_USER,
     ROLES,
@@ -56,10 +59,35 @@ def create_app() -> Flask:
 
     with app.app_context():
         db.create_all()
+        _ensure_schema()
         _seed_admin()
 
     _register_routes(app)
     return app
+
+
+def _ensure_schema() -> None:
+    """後から追加した列を、既存テーブルに対して不足していれば足す簡易マイグレーション。
+
+    本格的なマイグレーションツールは使わず、新規カラムのみを冪等に ADD COLUMN する。
+    """
+    from sqlalchemy import inspect, text
+
+    inspector = inspect(db.engine)
+    existing_tables = inspector.get_table_names()
+
+    # (テーブル, カラム, 追加DDL) の一覧
+    additions = [
+        ("agents", "provider", "ALTER TABLE agents ADD COLUMN provider VARCHAR(20) DEFAULT 'anthropic'"),
+        ("broadcast_results", "provider", "ALTER TABLE broadcast_results ADD COLUMN provider VARCHAR(20)"),
+    ]
+    for table, column, ddl in additions:
+        if table not in existing_tables:
+            continue
+        columns = {c["name"] for c in inspector.get_columns(table)}
+        if column not in columns:
+            with db.engine.begin() as conn:
+                conn.execute(text(ddl))
 
 
 def _seed_admin() -> None:
@@ -116,7 +144,12 @@ def admin_required(view):
 def _register_routes(app: Flask) -> None:
     @app.context_processor
     def inject_user():
-        return {"current_user": current_user()}
+        return {
+            "current_user": current_user(),
+            "providers": PROVIDERS,
+            "provider_labels": PROVIDER_LABELS,
+            "provider_default_model": PROVIDER_DEFAULT_MODEL,
+        }
 
     @app.route("/")
     def index():
@@ -463,6 +496,7 @@ def _register_routes(app: Flask) -> None:
                         BroadcastResult(
                             broadcast_id=record.id,
                             agent_name=r["agent_name"],
+                            provider=r.get("provider"),
                             model=r.get("model"),
                             status=r["status"],
                             response=r.get("response"),
@@ -497,7 +531,10 @@ def _register_routes(app: Flask) -> None:
 def _save_agent_from_form(agent):
     """フォーム内容から Agent を作成/更新する。成功で None、失敗でエラーメッセージ。"""
     name = (request.form.get("name") or "").strip()
-    model = (request.form.get("model") or "").strip() or DEFAULT_MODEL
+    provider = (request.form.get("provider") or "").strip()
+    if provider not in PROVIDERS:
+        return "AIプロバイダを選択してください。"
+    model = (request.form.get("model") or "").strip() or PROVIDER_DEFAULT_MODEL[provider]
     system_prompt = (request.form.get("system_prompt") or "").strip() or None
     max_tokens_raw = (request.form.get("max_tokens") or "").strip()
     enabled = request.form.get("enabled") == "on"
@@ -541,6 +578,7 @@ def _save_agent_from_form(agent):
         db.session.add(agent)
 
     agent.name = name
+    agent.provider = provider
     agent.model = model
     agent.system_prompt = system_prompt
     agent.max_tokens = max_tokens

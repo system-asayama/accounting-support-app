@@ -9,10 +9,21 @@
     <input id="name" name="name" required
            value="{{ (form.name if form else agent.name) or '' }}">
 
+    {% set cur_provider = (form.provider if form else (agent.provider if agent else '')) or 'anthropic' %}
+    <label for="provider">AIプロバイダ</label>
+    <select id="provider" name="provider" onchange="onProviderChange()">
+      {% for p in providers %}
+        <option value="{{ p }}" data-default="{{ provider_default_model[p] }}"
+          {% if p == cur_provider %}selected{% endif %}>{{ provider_labels[p] }}</option>
+      {% endfor %}
+    </select>
+
     <label for="model">モデル</label>
     <input id="model" name="model"
-           value="{{ (form.model if form else (agent.model if agent else '')) or default_model }}">
-    <p class="muted">例: {{ default_model }} / claude-opus-4-8 / claude-haiku-4-5-20251001</p>
+           value="{{ (form.model if form else (agent.model if agent else '')) or provider_default_model[cur_provider] }}">
+    <p class="muted" id="model-hint">
+      例: Claude → claude-sonnet-5 / claude-opus-4-8 ・ ChatGPT → gpt-5 / gpt-5-mini ・ Gemini → gemini-2.5-pro / gemini-2.5-flash
+    </p>
 
     <label for="system_prompt">システムプロンプト（任意）</label>
     <textarea id="system_prompt" name="system_prompt"
@@ -66,6 +77,16 @@
   function addMcpRow() {
     var tpl = document.getElementById('mcp-row-template');
     document.getElementById('mcp-list').appendChild(tpl.content.cloneNode(true));
+  }
+  // プロバイダ変更時、モデルが空またはデフォルト値のままなら新デフォルトへ差し替える
+  function onProviderChange() {
+    var sel = document.getElementById('provider');
+    var model = document.getElementById('model');
+    var defaults = Array.prototype.map.call(sel.options, function (o) { return o.dataset.default; });
+    var newDefault = sel.options[sel.selectedIndex].dataset.default;
+    if (!model.value.trim() || defaults.indexOf(model.value.trim()) !== -1) {
+      model.value = newDefault;
+    }
   }
 </script>
 {% endblock %}

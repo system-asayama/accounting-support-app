@@ -11,7 +11,7 @@
   {% if agents %}
   <div style="margin:8px 0 16px;">
     {% for a in agents %}
-      <span class="badge user" style="margin-right:6px;">{{ a.name }}</span>
+      <span class="badge user" style="margin-right:6px;">{{ a.name }}<span class="muted"> · {{ a.provider_label }}</span></span>
     {% endfor %}
   </div>
   <form method="post">

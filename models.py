@@ -7,8 +7,26 @@ from werkzeug.security import check_password_hash, generate_password_hash
 
 db = SQLAlchemy()
 
-# 一斉指示のデフォルトモデル
-DEFAULT_MODEL = "claude-sonnet-5"
+# 対応AIプロバイダ
+PROVIDER_ANTHROPIC = "anthropic"
+PROVIDER_OPENAI = "openai"
+PROVIDER_GEMINI = "gemini"
+PROVIDERS = (PROVIDER_ANTHROPIC, PROVIDER_OPENAI, PROVIDER_GEMINI)
+
+# プロバイダごとの表示名・デフォルトモデル
+PROVIDER_LABELS = {
+    PROVIDER_ANTHROPIC: "Claude (Anthropic)",
+    PROVIDER_OPENAI: "ChatGPT (OpenAI)",
+    PROVIDER_GEMINI: "Gemini (Google)",
+}
+PROVIDER_DEFAULT_MODEL = {
+    PROVIDER_ANTHROPIC: "claude-sonnet-5",
+    PROVIDER_OPENAI: "gpt-5",
+    PROVIDER_GEMINI: "gemini-2.5-pro",
+}
+
+# 一斉指示のデフォルトモデル（互換用）
+DEFAULT_MODEL = PROVIDER_DEFAULT_MODEL[PROVIDER_ANTHROPIC]
 
 # 利用可能なロール（権限）
 ROLE_ADMIN = "admin"
@@ -52,6 +70,7 @@ class Agent(db.Model):
 
     id = db.Column(db.Integer, primary_key=True)
     name = db.Column(db.String(80), unique=True, nullable=False)
+    provider = db.Column(db.String(20), nullable=False, default=PROVIDER_ANTHROPIC)
     model = db.Column(db.String(80), nullable=False, default=DEFAULT_MODEL)
     system_prompt = db.Column(db.Text, nullable=True)
     # MCPサーバー群を JSON 文字列で保持: [{"name","url","authorization_token"}]
@@ -72,8 +91,12 @@ class Agent(db.Model):
     def mcp_servers(self, value) -> None:
         self.mcp_servers_json = json.dumps(value or [], ensure_ascii=False)
 
+    @property
+    def provider_label(self) -> str:
+        return PROVIDER_LABELS.get(self.provider, self.provider)
+
     def __repr__(self) -> str:  # pragma: no cover - デバッグ用
-        return f"<Agent {self.name} ({self.model})>"
+        return f"<Agent {self.name} ({self.provider}/{self.model})>"
 
 
 class Broadcast(db.Model):
@@ -105,6 +128,7 @@ class BroadcastResult(db.Model):
     )
     # エージェントは後で削除されうるので名前をスナップショットとして保持
     agent_name = db.Column(db.String(80), nullable=False)
+    provider = db.Column(db.String(20), nullable=True)
     model = db.Column(db.String(80), nullable=True)
     status = db.Column(db.String(20), nullable=False, default="success")  # success / error
     response = db.Column(db.Text, nullable=True)

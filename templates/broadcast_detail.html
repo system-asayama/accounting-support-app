@@ -22,7 +22,7 @@
         {% if r.status == 'success' %}<span class="badge success">成功</span>
         {% else %}<span class="badge error">エラー</span>{% endif %}
       </h3>
-      <p class="muted" style="margin:0;">{{ r.model or '' }}</p>
+      <p class="muted" style="margin:0;">{{ provider_labels.get(r.provider, r.provider) if r.provider else '' }}{% if r.model %} · {{ r.model }}{% endif %}</p>
       {% if r.tools_used %}
       <p style="margin:8px 0 0;">
         {% for t in r.tools_used %}<span class="badge tool">🔧 {{ t }}</span>{% endfor %}
