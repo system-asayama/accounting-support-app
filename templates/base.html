@@ -16,9 +16,13 @@
     header nav a { color:#fff; text-decoration:none; padding:6px 10px; border-radius:6px;
                    font-size:14px; line-height:1.2; white-space:nowrap; }
     header nav a:hover { background:rgba(255,255,255,.18); }
+    .nav-toggle { display:none; background:none; border:none; color:#fff; font-size:26px;
+                  line-height:1; cursor:pointer; padding:2px 8px; margin:0; }
     @media (max-width:640px) {
-      header .brand { font-size:16px; width:100%; margin-right:0; }
-      header nav { width:100%; }
+      header .brand { font-size:16px; }
+      .nav-toggle { display:block; }
+      header nav { display:none; width:100%; flex-direction:column; gap:4px; }
+      header nav.open { display:flex; }
       header nav a { background:rgba(255,255,255,.12); }
     }
     .container { max-width:840px; margin:32px auto; padding:0 16px; }
@@ -66,7 +70,9 @@
   <header>
     <a class="brand" href="{{ url_for('dashboard') if current_user else url_for('login') }}"
        style="color:#fff; text-decoration:none;">📗 会計サポート</a>
-    <nav>
+    <button class="nav-toggle" type="button" aria-label="メニュー" aria-expanded="false"
+            onclick="var n=document.getElementById('mainnav');var o=n.classList.toggle('open');this.setAttribute('aria-expanded',o);">☰</button>
+    <nav id="mainnav">
       {% if current_user %}
         <a href="{{ url_for('dashboard') }}">ダッシュボード</a>
         <a href="{{ url_for('freee_status') }}">freee連携</a>
