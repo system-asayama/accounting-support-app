@@ -105,9 +105,15 @@ MCP_TRANSPORT=http MCP_AUTH_TOKEN=<秘密のトークン> MCP_PORT=8001 python m
 | `MCP_TRANSPORT` | `stdio`（既定）または `http` |
 | `MCP_AUTH_TOKEN` | HTTP 時の Bearer トークン（未設定だと認証なしで公開＝非推奨） |
 | `MCP_HOST` / `MCP_PORT` | HTTP の待受（既定 `0.0.0.0:8001`） |
+| `MCP_PUBLIC_URL` | 公開MCPエンドポイントURL（`/mcp-info` ページや各AI設定に表示） |
 
 > ChatGPT（開発者モード）は公開 HTTPS のリモート MCP のみ接続可能です。
-> HTTP 起動したサーバーを HTTPS で公開し、`MCP_AUTH_TOKEN` を設定してください。
+
+**公開構成（docker compose）**: リバースプロキシ（`proxy` / nginx）を1つの公開ポート
+（`WEB_PORT`）で受け、`/mcp` を MCP サーバー（`mcp:8001`）へ、それ以外を Web アプリ
+（`web:8000`）へ振り分けます。したがって MCP エンドポイントは
+`https://<ドメイン>/mcp`、接続情報ページは `https://<ドメイン>/mcp-info` になります。
+`.env` に `MCP_AUTH_TOKEN`（必須）と `MCP_PUBLIC_URL=https://<ドメイン>/mcp` を設定してください。
 
 ### MCP連携AIへの一斉指示（マルチプロバイダ・ブロードキャスト）
 1つの指示を、**Claude / ChatGPT / Gemini** を横断して複数AIへまとめて送り、

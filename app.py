@@ -870,12 +870,12 @@ def _register_routes(app: Flask) -> None:
         """各AIへ配布するチェック用プロンプトの雛形を表示する。"""
         return render_template("prompts.html", check_prompts=CHECK_PROMPTS)
 
-    @app.route("/mcp")
+    @app.route("/mcp-info")
     @login_required
     def mcp_info():
         """各AIをこのアプリのMCPサーバーへ接続するための情報・設定例を表示する。"""
         public_url = (os.environ.get("MCP_PUBLIC_URL") or "").strip()
-        suggested_url = f"https://{request.host}/mcp/"
+        suggested_url = f"https://{request.host}/mcp"
         endpoint = public_url or suggested_url
         token = (os.environ.get("MCP_AUTH_TOKEN") or "").strip()
         tools = [
