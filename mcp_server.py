@@ -659,7 +659,14 @@ def mf_context() -> dict:
 # OAuth フローに入らないので、URLを貼るだけで各AIが接続できる。
 # ---------------------------------------------------------------------------
 def mcp_secret() -> str:
-    return (os.environ.get("MCP_URL_SECRET") or os.environ.get("MCP_AUTH_TOKEN") or "").strip()
+    """秘密トークンを返す。環境変数を優先し、無ければDBから取得（自動生成）。"""
+    env = (os.environ.get("MCP_URL_SECRET") or os.environ.get("MCP_AUTH_TOKEN") or "").strip()
+    if env:
+        return env
+    from models import get_or_create_mcp_secret
+
+    with SessionLocal() as s:
+        return get_or_create_mcp_secret(s)
 
 
 def main() -> None:

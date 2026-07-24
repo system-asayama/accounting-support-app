@@ -877,6 +877,11 @@ def _register_routes(app: Flask) -> None:
         secret = (
             os.environ.get("MCP_URL_SECRET") or os.environ.get("MCP_AUTH_TOKEN") or ""
         ).strip()
+        if not secret:
+            # 環境変数が無ければDBの自動生成トークンを使う（設定作業ゼロで保護）
+            from models import get_or_create_mcp_secret
+
+            secret = get_or_create_mcp_secret(db.session)
         base = (os.environ.get("MCP_PUBLIC_URL") or f"https://{request.host}/mcp").strip()
         base = base.rstrip("/")
         # 秘密パス方式: /mcp/<secret> をURLに含める（認証ヘッダ不要・全AI共通）

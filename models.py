@@ -28,6 +28,32 @@ PROVIDER_DEFAULT_MODEL = {
 # 一斉指示のデフォルトモデル（互換用）
 DEFAULT_MODEL = PROVIDER_DEFAULT_MODEL[PROVIDER_ANTHROPIC]
 
+
+class AppSetting(db.Model):
+    """アプリ全体のキー/バリュー設定（MCP秘密トークンなど）。"""
+
+    __tablename__ = "app_settings"
+
+    key = db.Column(db.String(80), primary_key=True)
+    value = db.Column(db.Text, nullable=True)
+
+
+def get_or_create_mcp_secret(session) -> str:
+    """MCP接続URL用の秘密トークンを取得する（無ければ自動生成して保存）。
+
+    web アプリと MCP サーバーの両方から同じ DB を介して呼ばれるため、
+    どちらが先に起動しても同じ値を共有できる。
+    """
+    import secrets as _secrets
+
+    row = session.get(AppSetting, "mcp_url_secret")
+    if row is None or not (row.value or "").strip():
+        row = AppSetting(key="mcp_url_secret", value=_secrets.token_urlsafe(24))
+        session.merge(row)
+        session.commit()
+        row = session.get(AppSetting, "mcp_url_secret")
+    return row.value.strip()
+
 # 利用可能なロール（権限）
 ROLE_ADMIN = "admin"
 ROLE_USER = "user"
