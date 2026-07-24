@@ -111,7 +111,29 @@ def _receipt_to_dict(r: ImportedReceipt) -> dict:
 # ---------------------------------------------------------------------------
 # MCP サーバー定義
 # ---------------------------------------------------------------------------
-mcp = FastMCP("accounting-support-app")
+def _transport_security():
+    """HTTP公開時のHost/Origin検証設定。
+
+    リバースプロキシ経由で公開ドメインのHostヘッダが届くため、既定のDNSリバインディング
+    保護（localhost以外を421で拒否）を公開ドメイン許可に緩和する。秘密パスで保護している
+    ため、Host検証は実質不要だが、明示的に許可リストを設定する。
+    """
+    from mcp.server.transport_security import TransportSecuritySettings
+
+    hosts = ["localhost", "127.0.0.1", "mcp", "accounting-support.samurai-hub.com"]
+    extra = (os.environ.get("MCP_ALLOWED_HOSTS") or "").strip()
+    if extra:
+        hosts += [h.strip() for h in extra.split(",") if h.strip()]
+    # ポート付きHostヘッダにも対応
+    hosts += [f"{h}:8001" for h in list(hosts)] + [f"{h}:443" for h in list(hosts)]
+    return TransportSecuritySettings(
+        enable_dns_rebinding_protection=False,
+        allowed_hosts=hosts,
+        allowed_origins=["https://claude.ai", "https://chatgpt.com", "https://chat.openai.com"],
+    )
+
+
+mcp = FastMCP("accounting-support-app", transport_security=_transport_security())
 
 
 @mcp.tool()
