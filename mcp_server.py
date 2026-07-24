@@ -664,7 +664,15 @@ class TokenAuthMiddleware:
         if scope.get("type") == "http":
             headers = dict(scope.get("headers") or [])
             auth = headers.get(b"authorization", b"").decode()
-            if auth != f"Bearer {self.token}":
+            ok = auth == f"Bearer {self.token}"
+            if not ok:
+                # Web版コネクタ（claude.ai / ChatGPT）向け: ?key=<token> でも許可する
+                from urllib.parse import parse_qs
+
+                qs = parse_qs(scope.get("query_string", b"").decode())
+                if (qs.get("key") or [""])[0] == self.token:
+                    ok = True
+            if not ok:
                 await send(
                     {
                         "type": "http.response.start",

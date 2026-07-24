@@ -878,6 +878,8 @@ def _register_routes(app: Flask) -> None:
         suggested_url = f"https://{request.host}/mcp"
         endpoint = public_url or suggested_url
         token = (os.environ.get("MCP_AUTH_TOKEN") or "").strip()
+        # Web版コネクタ（claude.ai / ChatGPT）はURLしか渡せないため、トークンをクエリに付けたURLを用意
+        web_url = f"{endpoint}?key={token}" if token else endpoint
         tools = [
             ("list_deals", "取り込んだ取引の一覧"),
             ("get_deal", "取引1件の詳細＋解析結果"),
@@ -896,6 +898,7 @@ def _register_routes(app: Flask) -> None:
         return render_template(
             "mcp_info.html",
             endpoint=endpoint,
+            web_url=web_url,
             public_url_set=bool(public_url),
             suggested_url=suggested_url,
             token=token,
