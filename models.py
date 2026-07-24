@@ -272,6 +272,10 @@ class FreeeConnection(db.Model):
     __tablename__ = "freee_connections"
 
     id = db.Column(db.Integer, primary_key=True)
+    # アプリ情報（画面から設定可能。未設定時は環境変数を使う）
+    client_id = db.Column(db.String(255), nullable=True)
+    client_secret = db.Column(db.Text, nullable=True)
+    redirect_uri = db.Column(db.String(255), nullable=True)
     access_token = db.Column(db.Text, nullable=True)
     refresh_token = db.Column(db.Text, nullable=True)
     token_expires_at = db.Column(db.DateTime, nullable=True)
@@ -312,6 +316,9 @@ class MFConnection(db.Model):
     __tablename__ = "mf_connections"
 
     id = db.Column(db.Integer, primary_key=True)
+    client_id = db.Column(db.String(255), nullable=True)
+    client_secret = db.Column(db.Text, nullable=True)
+    redirect_uri = db.Column(db.String(255), nullable=True)
     access_token = db.Column(db.Text, nullable=True)
     refresh_token = db.Column(db.Text, nullable=True)
     token_expires_at = db.Column(db.DateTime, nullable=True)

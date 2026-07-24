@@ -37,10 +37,21 @@ class MFNotConnected(MFError):
 # 設定（クレデンシャル・エンドポイントは環境変数で指定）
 # ---------------------------------------------------------------------------
 def get_config() -> dict:
+    """アプリ情報を返す。画面から保存した値（DB）を優先し、無ければ環境変数を使う。"""
+    conn = None
+    try:
+        from models import MFConnection
+
+        conn = MFConnection.get()
+    except Exception:  # noqa: BLE001
+        conn = None
     return {
-        "client_id": os.environ.get("MF_CLIENT_ID", ""),
-        "client_secret": os.environ.get("MF_CLIENT_SECRET", ""),
-        "redirect_uri": os.environ.get("MF_REDIRECT_URI", OOB_REDIRECT),
+        "client_id": (conn.client_id if conn and conn.client_id else "")
+        or os.environ.get("MF_CLIENT_ID", ""),
+        "client_secret": (conn.client_secret if conn and conn.client_secret else "")
+        or os.environ.get("MF_CLIENT_SECRET", ""),
+        "redirect_uri": (conn.redirect_uri if conn and conn.redirect_uri else "")
+        or os.environ.get("MF_REDIRECT_URI", OOB_REDIRECT),
         "scope": os.environ.get("MF_SCOPE", ""),
         # 会計API のベースURLとパス（実環境に合わせて上書き可能）
         "api_base": os.environ.get("MF_API_BASE", "https://api.biz.moneyforward.com"),

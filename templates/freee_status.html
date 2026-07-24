@@ -31,6 +31,29 @@
 </div>
 
 <div class="card">
+  <h1>① アプリ情報を入力（この画面で連携）</h1>
+  <p class="muted">
+    freee で作成したアプリの <strong>Client ID / Client Secret</strong> を入力して保存すると、
+    サーバー設定（.env）不要でこの画面から認可できます。
+  </p>
+  <form method="post" action="{{ url_for('freee_settings') }}">
+    <label for="client_id">Client ID</label>
+    <input id="client_id" name="client_id" value="{{ conn.client_id or '' }}" placeholder="例: 771789826732422">
+    <label for="client_secret">Client Secret</label>
+    <input id="client_secret" name="client_secret" type="password"
+           placeholder="{% if conn.client_secret %}設定済み（変更する場合のみ入力）{% else %}freeeのアプリ基本情報からコピー{% endif %}">
+    <label for="redirect_uri">コールバックURL（リダイレクトURI）</label>
+    <input id="redirect_uri" name="redirect_uri" value="{{ conn.redirect_uri or callback_url }}">
+    <p class="muted" style="margin:6px 0 0;">
+      freee側のコールバックURLと<strong>完全一致</strong>させてください。<br>
+      ・自動で戻す方式（おすすめ）: 上の <code>{{ callback_url }}</code> を freee にも登録<br>
+      ・コード貼り付け方式(OOB): ここに <code>urn:ietf:wg:oauth:2.0:oob</code> と入力
+    </p>
+    <button type="submit">保存する</button>
+  </form>
+</div>
+
+<div class="card">
   <h1>接続方法</h1>
   {% if configured %}
     <p class="muted">

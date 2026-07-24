@@ -104,6 +104,11 @@ def _ensure_schema() -> None:
     additions.append(
         ("deal_analyses", "check_type", "ALTER TABLE deal_analyses ADD COLUMN check_type VARCHAR(40)")
     )
+    # 画面から設定するアプリ情報（Client ID/Secret/リダイレクトURI）
+    for tbl in ("freee_connections", "mf_connections"):
+        additions.append((tbl, "client_id", f"ALTER TABLE {tbl} ADD COLUMN client_id VARCHAR(255)"))
+        additions.append((tbl, "client_secret", f"ALTER TABLE {tbl} ADD COLUMN client_secret TEXT"))
+        additions.append((tbl, "redirect_uri", f"ALTER TABLE {tbl} ADD COLUMN redirect_uri VARCHAR(255)"))
 
     for table, column, ddl in additions:
         if table not in existing_tables:
@@ -585,6 +590,23 @@ def _register_routes(app: Flask) -> None:
             callback_url=callback_url,
         )
 
+    @app.route("/freee/settings", methods=["POST"])
+    @login_required
+    def freee_settings():
+        """画面から freee アプリ情報（Client ID/Secret/リダイレクトURI）を保存する。"""
+        conn = FreeeConnection.get()
+        cid = (request.form.get("client_id") or "").strip()
+        secret = (request.form.get("client_secret") or "").strip()
+        redirect_uri = (request.form.get("redirect_uri") or "").strip()
+        if cid:
+            conn.client_id = cid
+        if secret:  # 空欄なら既存のシークレットを維持
+            conn.client_secret = secret
+        conn.redirect_uri = redirect_uri or None
+        db.session.commit()
+        flash("freee アプリ情報を保存しました。「freeeで認可する」に進めます。", "success")
+        return redirect(url_for("freee_status"))
+
     @app.route("/freee/oauth/start")
     @login_required
     def freee_oauth_start():
@@ -896,6 +918,22 @@ def _register_routes(app: Flask) -> None:
             oob=mf_client.OOB_REDIRECT,
             callback_url=callback_url,
         )
+
+    @app.route("/mf/settings", methods=["POST"])
+    @login_required
+    def mf_settings():
+        conn = MFConnection.get()
+        cid = (request.form.get("client_id") or "").strip()
+        secret = (request.form.get("client_secret") or "").strip()
+        redirect_uri = (request.form.get("redirect_uri") or "").strip()
+        if cid:
+            conn.client_id = cid
+        if secret:
+            conn.client_secret = secret
+        conn.redirect_uri = redirect_uri or None
+        db.session.commit()
+        flash("マネーフォワードのアプリ情報を保存しました。「認可する」に進めます。", "success")
+        return redirect(url_for("mf_status"))
 
     @app.route("/mf/oauth/start")
     @login_required

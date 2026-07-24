@@ -448,8 +448,8 @@ MF_TOKEN_URL = "https://api.biz.moneyforward.com/token"
 
 
 def _refresh_freee(session, conn) -> bool:
-    cid = os.environ.get("FREEE_CLIENT_ID")
-    secret = os.environ.get("FREEE_CLIENT_SECRET")
+    cid = conn.client_id or os.environ.get("FREEE_CLIENT_ID")
+    secret = conn.client_secret or os.environ.get("FREEE_CLIENT_SECRET")
     if not (cid and secret and conn.refresh_token):
         return False
     try:
@@ -571,8 +571,8 @@ def freee_context() -> dict:
 
 
 def _refresh_mf(session, conn) -> bool:
-    cid = os.environ.get("MF_CLIENT_ID")
-    secret = os.environ.get("MF_CLIENT_SECRET")
+    cid = conn.client_id or os.environ.get("MF_CLIENT_ID")
+    secret = conn.client_secret or os.environ.get("MF_CLIENT_SECRET")
     if not (cid and secret and conn.refresh_token):
         return False
     try:

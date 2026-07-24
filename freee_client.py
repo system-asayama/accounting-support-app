@@ -36,10 +36,19 @@ class FreeeNotConnected(FreeeError):
 # 設定
 # ---------------------------------------------------------------------------
 def get_config() -> dict:
+    """アプリ情報を返す。画面から保存した値（DB）を優先し、無ければ環境変数を使う。"""
+    conn = None
+    try:
+        conn = FreeeConnection.get()
+    except Exception:  # noqa: BLE001 - DB未初期化などでは環境変数のみ
+        conn = None
     return {
-        "client_id": os.environ.get("FREEE_CLIENT_ID", ""),
-        "client_secret": os.environ.get("FREEE_CLIENT_SECRET", ""),
-        "redirect_uri": os.environ.get("FREEE_REDIRECT_URI", OOB_REDIRECT),
+        "client_id": (conn.client_id if conn and conn.client_id else "")
+        or os.environ.get("FREEE_CLIENT_ID", ""),
+        "client_secret": (conn.client_secret if conn and conn.client_secret else "")
+        or os.environ.get("FREEE_CLIENT_SECRET", ""),
+        "redirect_uri": (conn.redirect_uri if conn and conn.redirect_uri else "")
+        or os.environ.get("FREEE_REDIRECT_URI", OOB_REDIRECT),
     }
 
 

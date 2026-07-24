@@ -31,6 +31,27 @@
 </div>
 
 <div class="card">
+  <h1>① アプリ情報を入力（この画面で連携）</h1>
+  <p class="muted">
+    マネーフォワードで作成したアプリの <strong>Client ID / Client Secret</strong> を入力して保存すると、
+    この画面から認可できます。
+  </p>
+  <form method="post" action="{{ url_for('mf_settings') }}">
+    <label for="mf_client_id">Client ID</label>
+    <input id="mf_client_id" name="client_id" value="{{ conn.client_id or '' }}">
+    <label for="mf_client_secret">Client Secret</label>
+    <input id="mf_client_secret" name="client_secret" type="password"
+           placeholder="{% if conn.client_secret %}設定済み（変更する場合のみ入力）{% else %}アプリ設定からコピー{% endif %}">
+    <label for="mf_redirect_uri">コールバックURL（リダイレクトURI）</label>
+    <input id="mf_redirect_uri" name="redirect_uri" value="{{ conn.redirect_uri or callback_url }}">
+    <p class="muted" style="margin:6px 0 0;">
+      MF側のコールバックURLと完全一致させてください（自動で戻す方式なら <code>{{ callback_url }}</code>）。
+    </p>
+    <button type="submit">保存する</button>
+  </form>
+</div>
+
+<div class="card">
   <h1>接続方法</h1>
   {% if configured %}
     <p class="muted">
