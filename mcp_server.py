@@ -498,6 +498,34 @@ def _refresh_freee(session, conn) -> bool:
     return True
 
 
+def _freee_api(session, conn, path: str, params: dict, service: str = "accounting") -> dict:
+    """freee API へGET（トークン自動更新付き）。エラーは {"error": ...} で返す。"""
+    base = FREEE_SERVICE_BASE.get(service)
+    if not base:
+        return {"error": f"未対応の service です: {service}"}
+
+    def _do():
+        return requests.get(
+            f"{base}{path}",
+            headers={"Authorization": f"Bearer {conn.access_token}", "Accept": "application/json"},
+            params=params,
+            timeout=30,
+        )
+
+    try:
+        resp = _do()
+        if resp.status_code == 401 and _refresh_freee(session, conn):
+            resp = _do()
+    except requests.RequestException as exc:
+        return {"error": f"freee への接続に失敗しました: {exc}"}
+    if resp.status_code >= 400:
+        return {"error": f"freee API エラー（{resp.status_code}）", "body": resp.text[:2000]}
+    try:
+        return resp.json()
+    except ValueError:
+        return {"raw": resp.text[:5000]}
+
+
 @mcp.tool()
 def freee_get(path: str, params: dict | None = None, service: str = "accounting") -> dict:
     """freee API に直接 GET して生データを返す（読み取り専用）。
@@ -506,40 +534,183 @@ def freee_get(path: str, params: dict | None = None, service: str = "accounting"
     - path:    例 "/api/1/reports/trial_pl" や "/api/1/journals" など
     - params:  クエリ（例 {"limit": 100, "type": "income"}）。accounting では company_id を自動補完する
     - service: accounting(既定) / hr / invoice / pm / sm / it_management
-    利用可能なパスは freee_list_paths を参照。company_id は freee_context で取得できる。
+    利用可能なパスは freee_list_paths を参照。company_id は freee_context / find_company で取得できる。
     """
-    base = FREEE_SERVICE_BASE.get(service)
-    if not base:
-        return {"error": f"未対応の service です: {service}"}
     q = dict(params or {})
     with SessionLocal() as s:
         conn = s.get(FreeeConnection, 1)
         if not conn or not conn.access_token:
             return {"error": "freee と連携されていません。アプリで連携してください。"}
-        # accounting は company_id 必須のものが多いので自動補完
         if service == "accounting" and "company_id" not in q and conn.company_id:
             q["company_id"] = conn.company_id
+        return _freee_api(s, conn, path, q, service)
 
-        def _do():
-            return requests.get(
-                f"{base}{path}",
-                headers={"Authorization": f"Bearer {conn.access_token}", "Accept": "application/json"},
-                params=q,
-                timeout=30,
+
+@mcp.tool()
+def find_company(name: str) -> dict:
+    """顧問先（事業所）を名前で検索し、company_id を返す。
+
+    部分一致で候補を返す。以降のツール（import_deals / list_deals / freee_get 等）に
+    その company_id を渡せば、事業所を切り替えながら作業できる。
+    """
+    name = (name or "").strip()
+    if not name:
+        return {"error": "name を指定してください。"}
+    with SessionLocal() as s:
+        conn = s.get(FreeeConnection, 1)
+        if not conn or not conn.access_token:
+            return {"error": "freee と連携されていません。"}
+        data = _freee_api(s, conn, "/api/1/companies", {})
+        if "error" in data:
+            return data
+        companies = data.get("companies", [])
+        matches = []
+        for c in companies:
+            disp = c.get("display_name") or c.get("name") or ""
+            if name in disp:
+                matches.append({"company_id": c.get("id"), "name": disp})
+        return {
+            "query": name,
+            "count": len(matches),
+            "matches": matches[:20],
+            "note": "候補が多い場合は名前をより具体的にしてください。",
+        }
+
+
+@mcp.tool()
+def import_deals(
+    company_id: int,
+    start_date: str = "",
+    end_date: str = "",
+    deal_type: str = "",
+    max_deals: int = 500,
+) -> dict:
+    """freee から取引（仕訳）と証憑（OCR結果）をアプリへ取り込む。
+
+    チェックツール（find_duplicate_candidates 等）や write_analysis は取り込み済み
+    データが対象のため、チェック前にこのツールで対象顧問先のデータを取り込む。
+    - company_id: find_company で取得した事業所ID
+    - start_date / end_date: 発生日の範囲 (yyyy-mm-dd)。両方指定すると証憑も取り込む
+    - deal_type: "income" / "expense"（省略で全て）
+    - max_deals: 取り込み上限（既定500）
+    """
+    with SessionLocal() as s:
+        conn = s.get(FreeeConnection, 1)
+        if not conn or not conn.access_token:
+            return {"error": "freee と連携されていません。"}
+
+        # 名称マップ
+        account_map = {}
+        partner_map = {}
+        acc = _freee_api(s, conn, "/api/1/account_items", {"company_id": company_id})
+        if "error" in acc:
+            return acc
+        for a in acc.get("account_items", []):
+            account_map[a["id"]] = a.get("name", "")
+        par = _freee_api(s, conn, "/api/1/partners", {"company_id": company_id, "limit": 100})
+        for p in par.get("partners", []) if "error" not in par else []:
+            partner_map[p["id"]] = p.get("name", "")
+
+        # 取引（ページング）
+        scope_key = make_scope_key(SOURCE_FREEE, company_id=company_id)
+        created, updated, offset = 0, 0, 0
+        cap = max(1, min(max_deals, 2000))
+        while offset < cap:
+            params = {"company_id": company_id, "limit": 100, "offset": offset}
+            if start_date:
+                params["start_issue_date"] = start_date
+            if end_date:
+                params["end_issue_date"] = end_date
+            if deal_type in ("income", "expense"):
+                params["type"] = deal_type
+            page = _freee_api(s, conn, "/api/1/deals", params)
+            if "error" in page:
+                return page
+            deals = page.get("deals", [])
+            if not deals:
+                break
+            for d in deals:
+                details = d.get("details") or []
+                names = " / ".join(
+                    account_map.get(det.get("account_item_id"), str(det.get("account_item_id")))
+                    for det in details
+                )
+                receipt_ids = [r.get("id") for r in (d.get("receipts") or []) if r.get("id")]
+                row = (
+                    s.query(ImportedDeal)
+                    .filter(ImportedDeal.scope_key == scope_key, ImportedDeal.deal_id == d["id"])
+                    .first()
+                )
+                if row is None:
+                    row = ImportedDeal(deal_id=d["id"])
+                    s.add(row)
+                    created += 1
+                else:
+                    updated += 1
+                row.source = SOURCE_FREEE
+                row.scope_key = scope_key
+                row.company_id = company_id
+                row.issue_date = d.get("issue_date")
+                row.deal_type = d.get("type")
+                row.amount = d.get("amount")
+                row.partner_name = partner_map.get(d.get("partner_id")) or None
+                row.status = d.get("status")
+                row.account_items = names or None
+                row.details_json = json.dumps(details, ensure_ascii=False)
+                row.receipt_ids = receipt_ids
+                row.imported_at = datetime.utcnow()
+            offset += 100
+            if len(deals) < 100:
+                break
+
+        # 証憑（期間指定時のみ）
+        receipts_imported = 0
+        if start_date and end_date:
+            rec = _freee_api(
+                s,
+                conn,
+                "/api/1/receipts",
+                {"company_id": company_id, "start_date": start_date, "end_date": end_date, "limit": 100},
             )
+            if "error" not in rec:
+                for r in rec.get("receipts", []):
+                    meta = r.get("receipt_metadatum") or {}
+                    amount = meta.get("amount")
+                    ir = (
+                        s.query(ImportedReceipt)
+                        .filter(
+                            ImportedReceipt.scope_key == scope_key,
+                            ImportedReceipt.receipt_id == r["id"],
+                        )
+                        .first()
+                    )
+                    if ir is None:
+                        ir = ImportedReceipt(receipt_id=r["id"])
+                        s.add(ir)
+                    ir.source = SOURCE_FREEE
+                    ir.scope_key = scope_key
+                    ir.company_id = company_id
+                    ir.status = r.get("status")
+                    ir.description = (r.get("description") or "")[:255] or None
+                    ir.document_type = r.get("document_type")
+                    ir.origin = r.get("origin")
+                    ir.created_at = r.get("created_at")
+                    ir.ocr_partner_name = meta.get("partner_name") or None
+                    ir.ocr_issue_date = meta.get("issue_date") or None
+                    ir.ocr_amount = int(amount) if isinstance(amount, (int, float)) else None
+                    ir.metadatum_json = json.dumps(meta, ensure_ascii=False)
+                    ir.imported_at = datetime.utcnow()
+                    receipts_imported += 1
 
-        try:
-            resp = _do()
-            if resp.status_code == 401 and _refresh_freee(s, conn):
-                resp = _do()
-        except requests.RequestException as exc:
-            return {"error": f"freee への接続に失敗しました: {exc}"}
-        if resp.status_code >= 400:
-            return {"error": f"freee API エラー（{resp.status_code}）", "body": resp.text[:2000]}
-        try:
-            return resp.json()
-        except ValueError:
-            return {"raw": resp.text[:5000]}
+        s.commit()
+        return {
+            "ok": True,
+            "company_id": company_id,
+            "deals_created": created,
+            "deals_updated": updated,
+            "receipts_imported": receipts_imported,
+            "note": "以降のチェックツールには company_id を渡してください。",
+        }
 
 
 @mcp.tool()
