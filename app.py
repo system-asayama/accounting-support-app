@@ -118,6 +118,27 @@ def _ensure_schema() -> None:
             with db.engine.begin() as conn:
                 conn.execute(text(ddl))
 
+    # freee のIDは32bit整数を超えるため、既存列を BIGINT へ拡張（PostgreSQLのみ。
+    # SQLite は型に寛容なので不要）
+    if db.engine.dialect.name == "postgresql":
+        bigint_targets = {
+            "imported_deals": ["deal_id", "company_id", "amount"],
+            "imported_receipts": ["receipt_id", "company_id", "ocr_amount"],
+            "deal_analyses": ["deal_id", "company_id"],
+            "freee_connections": ["company_id"],
+        }
+        fresh_pg = inspect(db.engine)
+        for table, cols in bigint_targets.items():
+            if table not in existing_tables:
+                continue
+            current = {c["name"]: str(c["type"]).upper() for c in fresh_pg.get_columns(table)}
+            for col in cols:
+                if col in current and "BIGINT" not in current[col]:
+                    with db.engine.begin() as conn:
+                        conn.execute(
+                            text(f"ALTER TABLE {table} ALTER COLUMN {col} TYPE BIGINT")
+                        )
+
     # 既存の freee 行に scope_key を後付けで埋める（列追加後の状態で再取得する）
     fresh = inspect(db.engine)
     for tbl in ("imported_deals", "imported_receipts", "deal_analyses"):

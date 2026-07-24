@@ -195,9 +195,9 @@ class ImportedDeal(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     source = db.Column(db.String(20), nullable=False, default=SOURCE_FREEE)
     scope_key = db.Column(db.String(120), nullable=True, index=True)
-    company_id = db.Column(db.Integer, nullable=True, index=True)  # freee 事業所ID
+    company_id = db.Column(db.BigInteger, nullable=True, index=True)  # freee 事業所ID
     office_id = db.Column(db.String(80), nullable=True)  # MF 事業所ID
-    deal_id = db.Column(db.Integer, nullable=False)  # ソース上の取引ID
+    deal_id = db.Column(db.BigInteger, nullable=False)  # ソース上の取引ID
     issue_date = db.Column(db.String(20), nullable=True)
     deal_type = db.Column(db.String(20), nullable=True)  # income / expense
     amount = db.Column(db.BigInteger, nullable=True)
@@ -250,9 +250,9 @@ class ImportedReceipt(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     source = db.Column(db.String(20), nullable=False, default=SOURCE_FREEE)
     scope_key = db.Column(db.String(120), nullable=True, index=True)
-    company_id = db.Column(db.Integer, nullable=True, index=True)
+    company_id = db.Column(db.BigInteger, nullable=True, index=True)
     office_id = db.Column(db.String(80), nullable=True)
-    receipt_id = db.Column(db.Integer, nullable=False)  # ソース上の証憑ID
+    receipt_id = db.Column(db.BigInteger, nullable=False)  # ソース上の証憑ID
     status = db.Column(db.String(20), nullable=True)
     description = db.Column(db.String(255), nullable=True)
     document_type = db.Column(db.String(20), nullable=True)  # receipt / invoice / other
@@ -278,9 +278,9 @@ class DealAnalysis(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     source = db.Column(db.String(20), nullable=False, default=SOURCE_FREEE)
     scope_key = db.Column(db.String(120), nullable=True, index=True)
-    company_id = db.Column(db.Integer, nullable=True, index=True)
+    company_id = db.Column(db.BigInteger, nullable=True, index=True)
     office_id = db.Column(db.String(80), nullable=True)
-    deal_id = db.Column(db.Integer, nullable=False, index=True)
+    deal_id = db.Column(db.BigInteger, nullable=False, index=True)
     ai_name = db.Column(db.String(80), nullable=False)  # Claude / ChatGPT / Gemini など
     # チェック種別: duplicate（重複）/ receipt_link（証憑紐付け）/ ocr（読み取り結果）/ general
     check_type = db.Column(db.String(40), nullable=True)
@@ -306,7 +306,7 @@ class FreeeConnection(db.Model):
     refresh_token = db.Column(db.Text, nullable=True)
     token_expires_at = db.Column(db.DateTime, nullable=True)
     # 選択中の事業所
-    company_id = db.Column(db.Integer, nullable=True)
+    company_id = db.Column(db.BigInteger, nullable=True)
     company_name = db.Column(db.String(255), nullable=True)
     updated_at = db.Column(
         db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False
