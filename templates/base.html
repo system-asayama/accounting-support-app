@@ -85,6 +85,7 @@
         <a href="{{ url_for('freee_status') }}">freee連携</a>
         <a href="{{ url_for('mf_status') }}">MF連携</a>
         <a href="{{ url_for('prompts') }}">チェック手順</a>
+        <a href="{{ url_for('mcp_info') }}">MCP接続</a>
         <a href="{{ url_for('analyses') }}">解析比較</a>
         {% if current_user.is_admin %}<a href="{{ url_for('admin_users') }}">ユーザー管理</a>{% endif %}
         {% if current_user.is_admin %}<a href="{{ url_for('admin_settings') }}">管理者設定</a>

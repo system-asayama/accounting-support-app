@@ -870,6 +870,38 @@ def _register_routes(app: Flask) -> None:
         """各AIへ配布するチェック用プロンプトの雛形を表示する。"""
         return render_template("prompts.html", check_prompts=CHECK_PROMPTS)
 
+    @app.route("/mcp")
+    @login_required
+    def mcp_info():
+        """各AIをこのアプリのMCPサーバーへ接続するための情報・設定例を表示する。"""
+        public_url = (os.environ.get("MCP_PUBLIC_URL") or "").strip()
+        suggested_url = f"https://{request.host}/mcp/"
+        endpoint = public_url or suggested_url
+        token = (os.environ.get("MCP_AUTH_TOKEN") or "").strip()
+        tools = [
+            ("list_deals", "取り込んだ取引の一覧"),
+            ("get_deal", "取引1件の詳細＋解析結果"),
+            ("find_duplicate_candidates", "仕訳の重複候補"),
+            ("list_deals_without_receipt", "証憑が無い取引"),
+            ("list_receipts", "証憑（OCR結果）一覧・紐付け漏れ"),
+            ("check_receipt_ocr", "取引とOCRの突合"),
+            ("write_analysis", "解析結果をアプリへ書き込む"),
+            ("list_analyses", "書き込まれた解析結果の一覧"),
+            ("freee_get", "freeeの任意APIを読み取り（全情報）"),
+            ("freee_list_paths", "freeeの読み取り可能なパス一覧"),
+            ("freee_context", "選択中の事業所ID等"),
+            ("mf_get", "マネーフォワードの任意APIを読み取り"),
+            ("mf_context", "MFの選択中事業所ID等"),
+        ]
+        return render_template(
+            "mcp_info.html",
+            endpoint=endpoint,
+            public_url_set=bool(public_url),
+            suggested_url=suggested_url,
+            token=token,
+            tools=tools,
+        )
+
     @app.route("/analyses")
     @login_required
     def analyses():

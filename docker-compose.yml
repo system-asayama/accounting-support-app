@@ -19,6 +19,8 @@ services:
       MF_REDIRECT_URI: ${MF_REDIRECT_URI:-}
       MF_SCOPE: ${MF_SCOPE:-}
       MF_API_BASE: ${MF_API_BASE:-}
+      MCP_AUTH_TOKEN: ${MCP_AUTH_TOKEN:-}
+      MCP_PUBLIC_URL: ${MCP_PUBLIC_URL:-}
     depends_on:
       - db
     restart: unless-stopped

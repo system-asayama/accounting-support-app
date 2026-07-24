@@ -1,0 +1,94 @@
+{% extends "base.html" %}
+{% block title %}MCP接続{% endblock %}
+{% block content %}
+<div class="card">
+  <h1>🔌 MCP接続（各AIをこのアプリに繋ぐ）</h1>
+  <p class="muted">
+    各AI（Claude Code / ChatGPT / Gemini CLI）を、このアプリのMCPサーバーに接続します。
+    接続すると、AIは取り込んだ会計データやfreee/MFの全情報を読み取り、解析結果を書き戻せます。
+  </p>
+
+  <label>MCPエンドポイントURL</label>
+  <div class="copyrow" style="margin-top:6px;">
+    <code id="ep">{{ endpoint }}</code>
+    <button type="button" class="small" onclick="copyText('ep', this)">コピー</button>
+  </div>
+  {% if not public_url_set %}
+  <p class="flash error" style="margin:8px 0 0;">
+    ⚠️ 公開URLが未設定です。上は推定値です。MCPサーバー（ポート8001）を公開HTTPSで到達可能にし、
+    その実URLを環境変数 <code>MCP_PUBLIC_URL</code> に設定してください（例: <code>{{ suggested_url }}</code>）。
+  </p>
+  {% endif %}
+
+  <label style="margin-top:16px;">認証トークン（Authorization: Bearer）</label>
+  {% if token %}
+  <div class="copyrow" style="margin-top:6px;">
+    <code id="tk">{{ token }}</code>
+    <button type="button" class="small" onclick="copyText('tk', this)">コピー</button>
+  </div>
+  <p class="muted" style="margin:6px 0 0;">※ トークンはパスワード同様。共有に注意してください。</p>
+  {% else %}
+  <p class="flash error" style="margin:6px 0 0;">
+    ⚠️ <code>MCP_AUTH_TOKEN</code> が未設定です。公開接続（ChatGPT等）では必ず設定してください。
+  </p>
+  {% endif %}
+</div>
+
+<div class="card">
+  <h1>設定例（各AI）</h1>
+
+  <h3>ChatGPT（開発者モード）</h3>
+  <ol class="steps">
+    <li>設定 → <strong>コネクタ／開発者モード</strong> を有効化</li>
+    <li>「リモートMCPを追加」で上の<strong>エンドポイントURL</strong>を入力</li>
+    <li>認証に <code>Authorization: Bearer {{ token or '（トークン）' }}</code> を設定</li>
+    <li>チャット内でこのコネクタを有効化して利用</li>
+  </ol>
+
+  <h3>Claude Code</h3>
+  <div class="copyrow">
+    <button type="button" class="small" onclick="copyText('cc', this)">コピー</button>
+  </div>
+  <pre class="codebox" id="cc">claude mcp add --transport http accounting-support "{{ endpoint }}" \
+  --header "Authorization: Bearer {{ token or '（トークン）' }}"</pre>
+
+  <h3>Gemini CLI（settings.json）</h3>
+  <div class="copyrow">
+    <button type="button" class="small" onclick="copyText('gm', this)">コピー</button>
+  </div>
+  <pre class="codebox" id="gm">{
+  "mcpServers": {
+    "accounting-support": {
+      "httpUrl": "{{ endpoint }}",
+      "headers": { "Authorization": "Bearer {{ token or '（トークン）' }}" }
+    }
+  }
+}</pre>
+</div>
+
+<div class="card">
+  <h1>利用できるMCPツール</h1>
+  <div class="table-wrap">
+    <table>
+      <thead><tr><th>ツール</th><th>内容</th></tr></thead>
+      <tbody>
+        {% for name, desc in tools %}
+        <tr><td><code>{{ name }}</code></td><td class="wrap muted">{{ desc }}</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  <p class="muted" style="margin-top:10px;">
+    使い方の指示文は<a class="link" href="{{ url_for('prompts') }}">チェック手順</a>にあります。
+  </p>
+</div>
+
+<script>
+  function copyText(id, btn) {
+    var el = document.getElementById(id);
+    var t = el.textContent;
+    var done = function () { var o = btn.textContent; btn.textContent = 'コピー済'; setTimeout(function(){ btn.textContent = o; }, 1200); };
+    if (navigator.clipboard && navigator.clipboard.writeText) { navigator.clipboard.writeText(t).then(done, done); } else { done(); }
+  }
+</script>
+{% endblock %}
