@@ -8,35 +8,22 @@
     接続すると、AIは取り込んだ会計データやfreee/MFの全情報を読み取り、解析結果を書き戻せます。
   </p>
 
-  <label>MCPエンドポイントURL（Web版コネクタ用・claude.ai / ChatGPT）</label>
-  <p class="muted" style="margin:2px 0 6px;">Web版はURLしか渡せないため、トークン付きのこのURLを貼ってください。</p>
+  <label>MCP接続URL（このURLを各AIに貼るだけ・共通）</label>
+  <p class="muted" style="margin:2px 0 6px;">
+    URL内に秘密トークンを含めているので、認証ヘッダやOAuth設定は不要です。claude.ai / ChatGPT / Claude Code / Gemini すべて共通で使えます。
+  </p>
   <div class="copyrow">
-    <code id="wep">{{ web_url }}</code>
-    <button type="button" class="small" onclick="copyText('wep', this)">コピー</button>
-  </div>
-
-  <label style="margin-top:14px;">MCPエンドポイントURL（CLI用・Claude Code / Gemini CLI）</label>
-  <div class="copyrow" style="margin-top:6px;">
     <code id="ep">{{ endpoint }}</code>
     <button type="button" class="small" onclick="copyText('ep', this)">コピー</button>
   </div>
-  {% if not public_url_set %}
+  {% if not has_secret %}
   <p class="flash error" style="margin:8px 0 0;">
-    ⚠️ 公開URLが未設定です。上は推定値です。MCPサーバー（ポート8001）を公開HTTPSで到達可能にし、
-    その実URLを環境変数 <code>MCP_PUBLIC_URL</code> に設定してください（例: <code>{{ suggested_url }}</code>）。
+    ⚠️ <code>MCP_AUTH_TOKEN</code>（または <code>MCP_URL_SECRET</code>）が未設定です。
+    このままだと <code>/mcp</code> が誰でもアクセス可能になります。必ず設定してください。
   </p>
-  {% endif %}
-
-  <label style="margin-top:16px;">認証トークン（Authorization: Bearer）</label>
-  {% if token %}
-  <div class="copyrow" style="margin-top:6px;">
-    <code id="tk">{{ token }}</code>
-    <button type="button" class="small" onclick="copyText('tk', this)">コピー</button>
-  </div>
-  <p class="muted" style="margin:6px 0 0;">※ トークンはパスワード同様。共有に注意してください。</p>
   {% else %}
-  <p class="flash error" style="margin:6px 0 0;">
-    ⚠️ <code>MCP_AUTH_TOKEN</code> が未設定です。公開接続（ChatGPT等）では必ず設定してください。
+  <p class="muted" style="margin:6px 0 0;">
+    ⚠️ このURLはパスワード相当（秘密トークンを含む）です。他人に渡さないでください。
   </p>
   {% endif %}
 </div>
@@ -47,21 +34,16 @@
   <h3>claude.ai / ChatGPT（Web版コネクタ）</h3>
   <ol class="steps">
     <li>設定 → コネクタ（ChatGPTは開発者モード）で「カスタム/リモートMCPを追加」</li>
-    <li>URLに <strong>Web版コネクタ用URL</strong>（<code>?key=…</code> 付き）を貼る<br>
-      <span class="muted">認証（OAuth）欄は空のままでOK。トークンはURLに含まれています。</span></li>
-    <li>追加して有効化 → チャットで利用</li>
+    <li>URLに上の <strong>MCP接続URL</strong> をそのまま貼る<br>
+      <span class="muted">OAuth / Client ID / 認証欄は<strong>空のまま</strong>でOK。</span></li>
+    <li>「連携させる」→ 接続完了 → チャットで利用</li>
   </ol>
-  <p class="muted">
-    ※ Web版コネクタは OAuth 方式を試みるため、ヘッダ方式（Bearer）だと
-    「サインインサービスに登録できません」エラーになります。上の <code>?key=</code> 付きURLを使ってください。
-  </p>
 
   <h3>Claude Code</h3>
   <div class="copyrow">
     <button type="button" class="small" onclick="copyText('cc', this)">コピー</button>
   </div>
-  <pre class="codebox" id="cc">claude mcp add --transport http accounting-support "{{ endpoint }}" \
-  --header "Authorization: Bearer {{ token or '（トークン）' }}"</pre>
+  <pre class="codebox" id="cc">claude mcp add --transport http accounting-support "{{ endpoint }}"</pre>
 
   <h3>Gemini CLI（settings.json）</h3>
   <div class="copyrow">
@@ -70,8 +52,7 @@
   <pre class="codebox" id="gm">{
   "mcpServers": {
     "accounting-support": {
-      "httpUrl": "{{ endpoint }}",
-      "headers": { "Authorization": "Bearer {{ token or '（トークン）' }}" }
+      "httpUrl": "{{ endpoint }}"
     }
   }
 }</pre>

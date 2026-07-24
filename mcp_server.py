@@ -651,43 +651,15 @@ def mf_context() -> dict:
 
 
 # ---------------------------------------------------------------------------
-# HTTP 実行時のトークン認証（ChatGPT 等の公開接続向け）
+# HTTP 実行（公開接続向け）
+#
+# claude.ai / ChatGPT のWebコネクタは接続前に OAuth を試みるため、401 を返すと
+# 「サインイン登録に失敗」になる。そこで 401 は返さず、URLパスに秘密トークンを
+# 埋め込む方式（/mcp/<secret>）でアクセス制御する。正しいパス以外は 404 になり、
+# OAuth フローに入らないので、URLを貼るだけで各AIが接続できる。
 # ---------------------------------------------------------------------------
-class TokenAuthMiddleware:
-    """Authorization: Bearer <token> を検証する最小 ASGI ミドルウェア。"""
-
-    def __init__(self, app, token: str):
-        self.app = app
-        self.token = token
-
-    async def __call__(self, scope, receive, send):
-        if scope.get("type") == "http":
-            headers = dict(scope.get("headers") or [])
-            auth = headers.get(b"authorization", b"").decode()
-            ok = auth == f"Bearer {self.token}"
-            if not ok:
-                # Web版コネクタ（claude.ai / ChatGPT）向け: ?key=<token> でも許可する
-                from urllib.parse import parse_qs
-
-                qs = parse_qs(scope.get("query_string", b"").decode())
-                if (qs.get("key") or [""])[0] == self.token:
-                    ok = True
-            if not ok:
-                await send(
-                    {
-                        "type": "http.response.start",
-                        "status": 401,
-                        "headers": [(b"content-type", b"application/json")],
-                    }
-                )
-                await send(
-                    {
-                        "type": "http.response.body",
-                        "body": b'{"error":"unauthorized"}',
-                    }
-                )
-                return
-        await self.app(scope, receive, send)
+def mcp_secret() -> str:
+    return (os.environ.get("MCP_URL_SECRET") or os.environ.get("MCP_AUTH_TOKEN") or "").strip()
 
 
 def main() -> None:
@@ -695,12 +667,16 @@ def main() -> None:
     if transport == "http":
         import uvicorn
 
-        app = mcp.streamable_http_app()
-        token = os.environ.get("MCP_AUTH_TOKEN")
-        if token:
-            app = TokenAuthMiddleware(app, token)
+        secret = mcp_secret()
+        if secret:
+            # 秘密パスで公開（認証ヘッダ不要・401なし）
+            mcp.settings.streamable_http_path = f"/mcp/{secret}"
         else:
-            print("WARNING: MCP_AUTH_TOKEN 未設定のため認証なしで公開します。", flush=True)
+            print(
+                "WARNING: MCP_URL_SECRET / MCP_AUTH_TOKEN 未設定のため /mcp を認証なしで公開します。",
+                flush=True,
+            )
+        app = mcp.streamable_http_app()
         host = os.environ.get("MCP_HOST", "0.0.0.0")
         port = int(os.environ.get("MCP_PORT", "8001"))
         uvicorn.run(app, host=host, port=port)

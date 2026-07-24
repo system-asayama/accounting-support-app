@@ -30,6 +30,7 @@ services:
       MF_SCOPE: ${MF_SCOPE:-}
       MF_API_BASE: ${MF_API_BASE:-}
       MCP_AUTH_TOKEN: ${MCP_AUTH_TOKEN:-}
+      MCP_URL_SECRET: ${MCP_URL_SECRET:-}
       MCP_PUBLIC_URL: ${MCP_PUBLIC_URL:-}
     depends_on:
       - db
@@ -43,6 +44,7 @@ services:
       DATABASE_URL: postgresql://app:app@db:5432/easy_login_system_app
       MCP_TRANSPORT: http
       MCP_AUTH_TOKEN: ${MCP_AUTH_TOKEN:-}
+      MCP_URL_SECRET: ${MCP_URL_SECRET:-}
       MCP_HOST: 0.0.0.0
       MCP_PORT: "8001"
     depends_on:
