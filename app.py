@@ -72,6 +72,7 @@ def create_app() -> Flask:
     with app.app_context():
         db.create_all()
         _ensure_schema()
+        _backfill_scope_names()
         _seed_admin()
 
     _register_routes(app)
@@ -156,6 +157,26 @@ def _ensure_schema() -> None:
                         f"WHERE scope_key IS NULL AND company_id IS NOT NULL"
                     )
                 )
+
+
+def _backfill_scope_names() -> None:
+    """scope_name 追加前に取り込まれたデータへ、接続情報から事業所名を補完する。"""
+    try:
+        fc = db.session.get(FreeeConnection, 1)
+        if fc and fc.company_id and fc.company_name:
+            db.session.query(ImportedDeal).filter(
+                ImportedDeal.scope_key == make_scope_key(SOURCE_FREEE, company_id=fc.company_id),
+                ImportedDeal.scope_name.is_(None),
+            ).update({"scope_name": fc.company_name})
+        mf = db.session.get(MFConnection, 1)
+        if mf and mf.office_id and mf.office_name:
+            db.session.query(ImportedDeal).filter(
+                ImportedDeal.scope_key == make_scope_key(SOURCE_MF, office_id=mf.office_id),
+                ImportedDeal.scope_name.is_(None),
+            ).update({"scope_name": mf.office_name})
+        db.session.commit()
+    except Exception:  # noqa: BLE001 - 補完失敗は起動を妨げない
+        db.session.rollback()
 
 
 def _seed_admin() -> None:
@@ -913,8 +934,17 @@ def _register_routes(app: Flask) -> None:
             .group_by(ImportedDeal.company_id)
             .all()
         )
+        fc = FreeeConnection.get()
+
+        def company_label(cid, nm):
+            if nm:
+                return nm
+            if fc.company_id == cid and fc.company_name:
+                return fc.company_name
+            return f"ID:{cid}"
+
         companies = [
-            {"id": cid, "name": nm or f"ID:{cid}"} for cid, nm in rows
+            {"id": cid, "name": company_label(cid, nm)} for cid, nm in rows
         ]
         companies.sort(key=lambda x: x["name"])
 
