@@ -62,8 +62,8 @@ freee 会計 API と OAuth2 連携し、事業所の取引（仕訳）データ�
 > freee アプリは [freee アプリ管理](https://app.secure.freee.co.jp/developers/applications) で登録します。
 
 ### このアプリを MCP サーバーとして各AIへ公開（解析結果の集約）
-アプリ自身が **MCP サーバー**になり、取り込んだ freee データを各AI（Claude Code /
-ChatGPT / Gemini CLI など）へ提供します。各AIは MCP ツール経由で解析結果を
+アプリ自身が **MCP サーバー**になり、取り込んだ freee データを各AI（Claude /
+ChatGPT / Grok など）へ提供します。各AIは MCP ツール経由で解析結果を
 アプリへ書き戻し、`/analyses` の「解析比較」画面で並べて確認できます。
 
 この構成なら各AIは**定額プランのCLIから接続**でき、API従量課金なしで運用できます
@@ -93,7 +93,7 @@ freee ──API──▶ アプリ(取り込み) ──MCP──▶ 各AI(解析
 **起動方法**
 
 ```bash
-# ローカル接続（Claude Code / Gemini CLI 向け・stdio）
+# ローカル接続（Claude Code 向け・stdio）
 python mcp_server.py
 
 # 公開接続（ChatGPT 開発者モード向け・HTTP＋トークン認証）

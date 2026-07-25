@@ -1,14 +1,14 @@
 """各AIへ配布するチェック用プロンプトの雛形と、各AIアプリのURL。
 
 「事業所（顧問先）と期間を選ぶ → その内容が埋め込まれた指示文を表示」する形で使う。
-3社（Claude / ChatGPT / Gemini）へ同じ雛形を渡し、結果を「解析比較」で見比べる。
+3社（Claude / ChatGPT / Grok）へ同じ雛形を渡し、結果を「解析比較」で見比べる。
 """
 
 # 各AIのアプリを開くためのURL（新規タブ）
 AI_APPS = [
     {"name": "Claude", "url": "https://claude.ai/new", "hint": "Claude Code / claude.ai"},
     {"name": "ChatGPT", "url": "https://chatgpt.com/", "hint": "開発者モードでMCP接続"},
-    {"name": "Gemini", "url": "https://gemini.google.com/app", "hint": "Gemini CLI 等"},
+    {"name": "Grok", "url": "https://grok.com/", "hint": "Connectors でMCP接続"},
 ]
 
 
@@ -41,7 +41,7 @@ def _preamble(company_name: str, company_id, start_date: str, end_date: str) -> 
         + "3. 以降のツール呼び出しには必ず company_id を渡すこと。\n"
         "\n"
         "記録のルール: 判断結果は必ず write_analysis で書き戻すこと。\n"
-        "- ai_name にはあなたのモデル名（例: Claude / ChatGPT / Gemini）を入れる\n"
+        "- ai_name にはあなたのモデル名（例: Claude / ChatGPT / Grok）を入れる\n"
         "- verdict は ok / warning / error のいずれか\n"
         "- result には判断根拠を日本語で簡潔に書く\n"
     )

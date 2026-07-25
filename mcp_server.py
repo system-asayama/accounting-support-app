@@ -1,6 +1,6 @@
 """このアプリを「MCPサーバー」として公開するモジュール。
 
-各AI（Claude Code / ChatGPT / Gemini など）がこのサーバーに接続し、
+各AI（Claude Code / ChatGPT / Grok など）がこのサーバーに接続し、
 - 取り込んだ freee の取引（仕訳）データを読む
 - 解析結果をアプリへ書き戻す
 という操作を MCP ツール経由で行える。
@@ -222,7 +222,7 @@ def write_analysis(
 ) -> dict:
     """取引に対する解析結果をアプリへ書き込む（追記／履歴として残す）。
 
-    - ai_name:    どのAIによる解析か（例: "Claude", "ChatGPT", "Gemini"）
+    - ai_name:    どのAIによる解析か（例: "Claude", "ChatGPT", "Grok"）
     - result:     解析本文
     - check_type: チェック種別 "duplicate"(重複) / "receipt_link"(証憑紐付け) /
                   "ocr"(読み取り結果) / "general"

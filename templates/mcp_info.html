@@ -4,13 +4,13 @@
 <div class="card">
   <h1>🔌 MCP接続（各AIをこのアプリに繋ぐ）</h1>
   <p class="muted">
-    各AI（Claude Code / ChatGPT / Gemini CLI）を、このアプリのMCPサーバーに接続します。
+    各AI（Claude / ChatGPT / Grok）を、このアプリのMCPサーバーに接続します。
     接続すると、AIは取り込んだ会計データやfreee/MFの全情報を読み取り、解析結果を書き戻せます。
   </p>
 
   <label>MCP接続URL（このURLを各AIに貼るだけ・共通）</label>
   <p class="muted" style="margin:2px 0 6px;">
-    URL内に秘密トークンを含めているので、認証ヘッダやOAuth設定は不要です。claude.ai / ChatGPT / Claude Code / Gemini すべて共通で使えます。
+    URL内に秘密トークンを含めているので、認証ヘッダやOAuth設定は不要です。claude.ai / ChatGPT / Grok / Claude Code すべて共通で使えます。
   </p>
   <div class="copyrow">
     <code id="ep">{{ endpoint }}</code>
@@ -31,31 +31,36 @@
 <div class="card">
   <h1>設定例（各AI）</h1>
 
-  <h3>claude.ai / ChatGPT（Web版コネクタ）</h3>
+  <h3>claude.ai（Web版コネクタ）</h3>
   <ol class="steps">
-    <li>設定 → コネクタ（ChatGPTは開発者モード）で「カスタム/リモートMCPを追加」</li>
+    <li>設定 → コネクタ →「カスタムコネクタを追加」</li>
     <li>URLに上の <strong>MCP接続URL</strong> をそのまま貼る<br>
       <span class="muted">OAuth / Client ID / 認証欄は<strong>空のまま</strong>でOK。</span></li>
     <li>「連携させる」→ 接続完了 → チャットで利用</li>
   </ol>
 
-  <h3>Claude Code</h3>
+  <h3>ChatGPT（開発者モードのコネクタ）</h3>
+  <ol class="steps">
+    <li>設定 → アプリとコネクタ → 詳細設定 で「<strong>開発者モード</strong>」をON（Plus等の有料プランが必要）</li>
+    <li>コネクタ画面の「作成する」で新規作成（スマホで作成ボタンが出ない場合はPCブラウザで）：<br>
+      名前 <code>accounting-support-app</code> ／ 接続=サーバーのURL に上の <strong>MCP接続URL</strong> ／
+      認証は「<strong>認証なし</strong>」に変更</li>
+    <li>リスク同意にチェック →「作成」→ チャットの「＋ → 開発者モード」でコネクタを有効化して利用</li>
+  </ol>
+
+  <h3>Grok（Web版 Connectors）</h3>
+  <ol class="steps">
+    <li><a class="link" href="https://grok.com/" target="_blank" rel="noopener">grok.com</a> にログイン
+      （カスタムコネクタには SuperGrok または X Premium+ が必要）</li>
+    <li>設定 → <strong>Connectors</strong> でカスタムMCPコネクタを追加し、上の <strong>MCP接続URL</strong> を貼る（認証は「なし」）</li>
+    <li>接続完了後、チャットでコネクタを有効化して利用</li>
+  </ol>
+
+  <h3>Claude Code（CLI）</h3>
   <div class="copyrow">
     <button type="button" class="small" onclick="copyText('cc', this)">コピー</button>
   </div>
   <pre class="codebox" id="cc">claude mcp add --transport http accounting-support "{{ endpoint }}"</pre>
-
-  <h3>Gemini CLI（settings.json）</h3>
-  <div class="copyrow">
-    <button type="button" class="small" onclick="copyText('gm', this)">コピー</button>
-  </div>
-  <pre class="codebox" id="gm">{
-  "mcpServers": {
-    "accounting-support": {
-      "httpUrl": "{{ endpoint }}"
-    }
-  }
-}</pre>
 </div>
 
 <div class="card">
