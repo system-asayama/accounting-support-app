@@ -50,9 +50,44 @@ def _preamble(company_name: str, company_id, start_date: str, end_date: str) -> 
 def build_check_prompts(
     company_name: str, company_id=None, start_date: str = "", end_date: str = ""
 ) -> list:
-    """事業所・期間を埋め込んだ3チェックの指示文を返す。"""
+    """事業所・期間を埋め込んだチェックの指示文を返す（先頭は全項目の一括版）。"""
     pre = _preamble(company_name, company_id, start_date, end_date)
     return [
+        {
+            "key": "all",
+            "title": "一括チェック（全4項目まとめて実行）",
+            "check_type": "duplicate / cross_payment / receipt_link / ocr",
+            "body": pre
+            + (
+                "\n【タスク】一括チェック（4項目すべてを順に実行）\n"
+                "取り込み（import_deals）は最初の1回だけでよい。以降は取り込み済みデータに対して\n"
+                "次の4つのチェックをすべて実行し、項目ごとに指定の check_type で write_analysis に記録すること。\n"
+                "\n"
+                "■1. 仕訳の重複チェック（check_type=\"duplicate\"）\n"
+                "  - find_duplicate_candidates(company_id) で重複候補グループを取得する。\n"
+                "  - 各グループを get_deal で確認し、二重計上の疑い（warning・相手の deal_id と根拠を記載）か、\n"
+                "    正当な別取引（ok・理由を記載）かを代表の deal_id へ記録する。\n"
+                "\n"
+                "■2. クレカ×現金の二重計上チェック（check_type=\"cross_payment\"）\n"
+                "  - find_cross_payment_duplicates(company_id) を呼ぶ。cross_payment=true のペアを最優先で\n"
+                "    get_deal で確認し、同一支出の二重計上か偶然の同額かを判断する。\n"
+                "  - ペアの両方の deal_id へ記録する（warning は相手方 deal_id と根拠、ok は理由）。\n"
+                "  - skipped_recurring_groups は対象外でよい。\n"
+                "\n"
+                "■3. 領収書・レシートの紐付けチェック（check_type=\"receipt_link\"）\n"
+                "  - list_deals_without_receipt(company_id) と list_receipts(company_id, only_unlinked=True) を確認する。\n"
+                "  - 金額の大きい取引を優先し、証憑を添付すべき→warning／不要・問題なし→ok で記録する。\n"
+                "  - 未紐付けの証憑があれば、紐付け先候補も result に書く。\n"
+                "\n"
+                "■4. 領収書・レシートのOCR読み取り結果チェック（check_type=\"ocr\"）\n"
+                "  - has_receipt=true の取引について check_receipt_ocr(deal_id, company_id) を呼び、\n"
+                "    取引値とOCR値の不一致 flags を確認する。\n"
+                "  - 明確な不一致→error／軽微・要確認→warning／一致→ok で記録する。\n"
+                "\n"
+                "最後に、4項目それぞれの結果（記録した件数と warning/error の要点）を\n"
+                "日本語のサマリーとしてチャットにも報告すること。\n"
+            ),
+        },
         {
             "key": "duplicate",
             "title": "仕訳の重複チェック",
