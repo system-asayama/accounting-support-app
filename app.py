@@ -24,7 +24,7 @@ from flask import (
 import freee_client
 import mf_client
 from broadcast_service import BroadcastError, run_broadcast
-from prompts import AI_APPS, build_check_prompts
+from prompts import AI_APPS, CHECK_TYPE_LABELS, build_check_prompts
 from models import (
     DEFAULT_MODEL,
     PROVIDER_DEFAULT_MODEL,
@@ -1147,21 +1147,57 @@ def _register_routes(app: Flask) -> None:
             .all()
         )
 
-        # 並び順: ⚠️指摘あり → ✅OK → 未解析（各グループ内は日付降順）
-        def severity(d):
-            verdicts = [a.verdict for a in d.analyses]
-            if any(v in ("warning", "error") for v in verdicts):
-                return 0
-            if verdicts:
-                return 1
-            return 2
+        # チェックカテゴリ（check_type）ごとにセクション分けする。
+        # 同じ取引でも、複数カテゴリの解析があればそれぞれのセクションに表示する。
+        known_types = list(CHECK_TYPE_LABELS.keys())
+        found_types = []
+        for d in deals:
+            for a in d.analyses:
+                ct = a.check_type or "general"
+                if ct not in found_types:
+                    found_types.append(ct)
+        ordered_types = [t for t in known_types if t in found_types] + sorted(
+            t for t in found_types if t not in known_types
+        )
 
-        deals.sort(key=lambda d: (severity(d), ), reverse=False)
+        sections = []
+        for ct in ordered_types:
+            items = []
+            for d in deals:
+                anas = [a for a in d.analyses if (a.check_type or "general") == ct]
+                if anas:
+                    items.append({"deal": d, "analyses": anas})
+            if not items:
+                continue
+            # ⚠️指摘あり → ✅OK（各グループ内は日付降順のまま）
+            items.sort(
+                key=lambda it: 0
+                if any(a.verdict in ("warning", "error") for a in it["analyses"])
+                else 1
+            )
+            warning_count = sum(
+                1
+                for it in items
+                if any(a.verdict in ("warning", "error") for a in it["analyses"])
+            )
+            sections.append(
+                {
+                    "key": ct,
+                    "title": CHECK_TYPE_LABELS.get(ct, ct),
+                    "rows": items,
+                    "count": len(items),
+                    "warning_count": warning_count,
+                }
+            )
+
+        unanalyzed = [d for d in deals if not d.analyses]
 
         return render_template(
             "analyses.html",
             scope_name=(selected["name"] if selected else scope),
             deals=deals,
+            sections=sections,
+            unanalyzed=unanalyzed,
             scopes=scopes,
         )
 

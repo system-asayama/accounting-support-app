@@ -4,6 +4,15 @@
 3社（Claude / ChatGPT / Grok）へ同じ雛形を渡し、結果を「解析比較」で見比べる。
 """
 
+# チェックカテゴリ（check_type）の表示名。解析比較のセクション分けにも使う（この並び順で表示）
+CHECK_TYPE_LABELS = {
+    "duplicate": "仕訳の重複チェック",
+    "cross_payment": "クレカ×現金の二重計上チェック",
+    "receipt_link": "領収書・レシートの紐付けチェック",
+    "ocr": "OCR読み取り結果チェック",
+    "general": "その他",
+}
+
 # 各AIのアプリを開くためのURL（新規タブ）
 AI_APPS = [
     {"name": "Claude", "url": "https://claude.ai/new", "hint": "Claude Code / claude.ai"},

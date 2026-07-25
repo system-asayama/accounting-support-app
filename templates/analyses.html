@@ -8,9 +8,26 @@
     ・<a class="link" href="{{ url_for('analyses', select=1) }}">別の事業所を選ぶ</a>
   </p>
   <p class="muted">
-    並び順: ⚠️ 指摘あり → ✅ OK → 未解析（各AIが MCP 経由で書き込んだ結果を比較表示）
+    チェックのカテゴリごとに分けて表示します。各カテゴリ内は ⚠️ 指摘あり → ✅ OK の順です。
   </p>
-  <div class="inline" style="flex-wrap:wrap; gap:8px;">
+
+  {% if sections %}
+  <label>カテゴリへ移動</label>
+  <div class="inline" style="flex-wrap:wrap; gap:8px; margin-top:6px;">
+    {% for sec in sections %}
+      <a href="#sec-{{ sec.key }}">
+        <button type="button" class="small {% if not sec.warning_count %}secondary{% endif %}">
+          {{ sec.title }}（{% if sec.warning_count %}⚠️{{ sec.warning_count }}／{% endif %}{{ sec.count }}件）
+        </button>
+      </a>
+    {% endfor %}
+    {% if unanalyzed %}
+      <a href="#sec-unanalyzed"><button type="button" class="small secondary">未解析（{{ unanalyzed | length }}件）</button></a>
+    {% endif %}
+  </div>
+  {% endif %}
+
+  <div class="inline" style="flex-wrap:wrap; gap:8px; margin-top:10px;">
     {% for app in ai_apps %}
       <a href="{{ app.url }}" target="_blank" rel="noopener">
         <button type="button" class="secondary small">🚀 {{ app.name }}</button>
@@ -18,50 +35,85 @@
     {% endfor %}
     <a href="{{ url_for('prompts') }}"><button type="button" class="small">チェック手順・指示雛形</button></a>
   </div>
+
   {% if not deals %}
     <p class="muted">
       まだ取り込んだ取引がありません。
       <a class="link" href="{{ url_for('freee_deals') }}">取引データ</a>から「アプリに取り込む」を実行してください。
     </p>
+  {% elif not sections %}
+    <p class="muted">
+      まだ解析結果はありません（各AIが MCP の <code>write_analysis</code> で書き込むと、ここにカテゴリ別で表示されます）。
+    </p>
   {% endif %}
 </div>
 
-{% for d in deals %}
-<div class="card">
-  <div class="inline" style="justify-content:space-between; flex-wrap:wrap; gap:8px;">
-    <div>
-      <strong>#{{ d.deal_id }}</strong>
-      <span class="badge {% if d.source == 'mf' %}admin{% else %}user{% endif %}">{{ d.source }}</span>
-      <span class="muted">{{ d.issue_date }}</span>
-      {% if d.deal_type == 'income' %}<span class="badge success">収入</span>
-      {% elif d.deal_type == 'expense' %}<span class="badge error">支出</span>{% endif %}
-      ¥{{ '{:,}'.format(d.amount or 0) }}
-      <span class="muted">{{ d.partner_name or '' }}</span>
-      {% if d.has_receipt %}<span class="badge success">証憑{{ d.receipt_ids | length }}</span>
-      {% else %}<span class="badge error">証憑なし</span>{% endif %}
-    </div>
-    <span class="muted">{{ d.account_items or '' }}</span>
-  </div>
+{% for sec in sections %}
+<div class="card" id="sec-{{ sec.key }}">
+  <h1>{{ sec.title }}
+    {% if sec.warning_count %}<span class="badge error">⚠️ 指摘 {{ sec.warning_count }}件</span>{% endif %}
+    <span class="badge user">対象 {{ sec.count }}件</span>
+  </h1>
 
-  {% if d.analyses %}
-  <div class="result-grid" style="margin-top:12px;">
-    {% for a in d.analyses %}
-    <div class="result">
-      <h3>
-        {{ a.ai_name }}
-        {% if a.check_type and a.check_type != 'general' %}<span class="badge user">{{ a.check_type }}</span>{% endif %}
-        {% if a.verdict == 'ok' %}<span class="badge success">{{ a.verdict }}</span>
-        {% elif a.verdict in ('warning', 'error') %}<span class="badge error">{{ a.verdict }}</span>
-        {% elif a.verdict %}<span class="badge user">{{ a.verdict }}</span>{% endif %}
-      </h3>
-      <p class="muted" style="margin:0;">{{ a.created_at.strftime('%Y-%m-%d %H:%M') }}</p>
-      <pre>{{ a.result }}</pre>
+  {% for it in sec.rows %}
+  {% set d = it.deal %}
+  <div style="border-top:1px solid var(--border, #ddd); padding-top:12px; margin-top:12px;">
+    <div class="inline" style="justify-content:space-between; flex-wrap:wrap; gap:8px;">
+      <div>
+        <strong>#{{ d.deal_id }}</strong>
+        <span class="badge {% if d.source == 'mf' %}admin{% else %}user{% endif %}">{{ d.source }}</span>
+        <span class="muted">{{ d.issue_date }}</span>
+        {% if d.deal_type == 'income' %}<span class="badge success">収入</span>
+        {% elif d.deal_type == 'expense' %}<span class="badge error">支出</span>{% endif %}
+        ¥{{ '{:,}'.format(d.amount or 0) }}
+        <span class="muted">{{ d.partner_name or '' }}</span>
+        {% if d.has_receipt %}<span class="badge success">証憑{{ d.receipt_ids | length }}</span>
+        {% else %}<span class="badge error">証憑なし</span>{% endif %}
+      </div>
+      <span class="muted">{{ d.account_items or '' }}</span>
     </div>
-    {% endfor %}
+
+    <div class="result-grid" style="margin-top:12px;">
+      {% for a in it.analyses %}
+      <div class="result">
+        <h3>
+          {{ a.ai_name }}
+          {% if a.verdict == 'ok' %}<span class="badge success">{{ a.verdict }}</span>
+          {% elif a.verdict in ('warning', 'error') %}<span class="badge error">{{ a.verdict }}</span>
+          {% elif a.verdict %}<span class="badge user">{{ a.verdict }}</span>{% endif %}
+        </h3>
+        <p class="muted" style="margin:0;">{{ a.created_at.strftime('%Y-%m-%d %H:%M') }}</p>
+        <pre>{{ a.result }}</pre>
+      </div>
+      {% endfor %}
+    </div>
   </div>
-  {% else %}
-  <p class="muted" style="margin:10px 0 0;">まだ解析結果はありません（各AIが MCP の <code>write_analysis</code> で書き込みます）。</p>
-  {% endif %}
+  {% endfor %}
 </div>
 {% endfor %}
+
+{% if unanalyzed %}
+<div class="card" id="sec-unanalyzed">
+  <h1>未解析の取引 <span class="badge user">{{ unanalyzed | length }}件</span></h1>
+  <p class="muted">まだどのAIからも解析結果が書き込まれていない取引です。</p>
+  <div class="table-wrap">
+    <table>
+      <thead><tr><th>取引</th><th>日付</th><th>種別</th><th>金額</th><th>取引先</th><th>科目</th><th>証憑</th></tr></thead>
+      <tbody>
+        {% for d in unanalyzed %}
+        <tr>
+          <td>#{{ d.deal_id }}</td>
+          <td>{{ d.issue_date }}</td>
+          <td>{% if d.deal_type == 'income' %}収入{% elif d.deal_type == 'expense' %}支出{% else %}{{ d.deal_type or '' }}{% endif %}</td>
+          <td>¥{{ '{:,}'.format(d.amount or 0) }}</td>
+          <td class="muted">{{ d.partner_name or '' }}</td>
+          <td class="muted">{{ d.account_items or '' }}</td>
+          <td>{% if d.has_receipt %}あり{% else %}<span class="muted">なし</span>{% endif %}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% endif %}
 {% endblock %}
