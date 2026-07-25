@@ -278,6 +278,105 @@ def write_analysis(
         }
 
 
+@mcp.tool()
+def bulk_write_ok(
+    ai_name: str,
+    check_type: str,
+    result: str = "",
+    exclude_deal_ids: list[int] | None = None,
+    only_with_receipt: bool = False,
+    company_id: int | None = None,
+    office_id: str | None = None,
+) -> dict:
+    """候補に挙がらなかった取引へ「問題なし（verdict=ok）」を1回でまとめて記録する。
+
+    チェックの証跡を全取引に残すためのツール。個別に判定した（またはこれから判定する）
+    取引は exclude_deal_ids で除外すること。
+
+    - ai_name:          どのAIによる記録か（write_analysis と同じ）
+    - check_type:       "duplicate" / "cross_payment" / "receipt_link" など。
+                        "ocr" は不可（OCRチェックは証憑付き取引を全件個別判定する運用）
+    - result:           記録する本文（省略時は「候補抽出で該当なし（問題なし）」）
+    - exclude_deal_ids: 除外する取引ID（候補に挙がった取引など）
+    - only_with_receipt: True で証憑が紐付いている取引だけを対象にする
+                        （証憑紐付けチェックの「証憑あり→問題なし」一括記録用）
+    - 同じ ai_name × check_type の記録が既にある取引はスキップする（再実行しても重複しない）
+    """
+    ai_name = (ai_name or "").strip()
+    check_type = (check_type or "").strip()[:40]
+    if not ai_name:
+        return {"ok": False, "error": "ai_name は必須です。"}
+    if not check_type:
+        return {"ok": False, "error": "check_type は必須です。"}
+    if check_type == "ocr":
+        return {
+            "ok": False,
+            "error": "OCRチェックの一括記録はできません。証憑付き取引は check_receipt_ocr で全件個別に判定し、write_analysis で記録してください。",
+        }
+    result = (result or "").strip() or "候補抽出で該当なし（問題なし）"
+    exclude = set(exclude_deal_ids or [])
+
+    with SessionLocal() as s:
+        scope_key, source = _resolve_scope(s, company_id, office_id)
+        if not scope_key:
+            return {"ok": False, "error": "事業所が特定できません。company_id / office_id を指定してください。"}
+
+        deals = (
+            s.query(ImportedDeal)
+            .filter(ImportedDeal.scope_key == scope_key)
+            .all()
+        )
+        existing = {
+            row[0]
+            for row in s.query(DealAnalysis.deal_id)
+            .filter(
+                DealAnalysis.scope_key == scope_key,
+                DealAnalysis.ai_name == ai_name[:80],
+                DealAnalysis.check_type == check_type,
+            )
+            .all()
+        }
+
+        created = 0
+        skipped_excluded = 0
+        skipped_existing = 0
+        skipped_no_receipt = 0
+        for d in deals:
+            if d.deal_id in exclude:
+                skipped_excluded += 1
+                continue
+            if only_with_receipt and not d.has_receipt:
+                skipped_no_receipt += 1
+                continue
+            if d.deal_id in existing:
+                skipped_existing += 1
+                continue
+            s.add(
+                DealAnalysis(
+                    source=source,
+                    scope_key=scope_key,
+                    company_id=d.company_id,
+                    office_id=d.office_id,
+                    deal_id=d.deal_id,
+                    ai_name=ai_name[:80],
+                    check_type=check_type,
+                    result=result,
+                    verdict="ok",
+                )
+            )
+            created += 1
+        s.commit()
+        return {
+            "ok": True,
+            "check_type": check_type,
+            "created": created,
+            "skipped_excluded": skipped_excluded,
+            "skipped_existing": skipped_existing,
+            "skipped_without_receipt": skipped_no_receipt,
+            "total_deals": len(deals),
+        }
+
+
 # ---------------------------------------------------------------------------
 # 会計チェック用ツール（重複 / 証憑紐付け / OCR読み取り結果）
 # ---------------------------------------------------------------------------

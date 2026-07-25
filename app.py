@@ -1029,6 +1029,7 @@ def _register_routes(app: Flask) -> None:
             ("list_receipts", "証憑（OCR結果）一覧・紐付け漏れ"),
             ("check_receipt_ocr", "取引とOCRの突合"),
             ("write_analysis", "解析結果をアプリへ書き込む"),
+            ("bulk_write_ok", "候補外の取引へ「問題なし」を一括記録（証跡用）"),
             ("list_analyses", "書き込まれた解析結果の一覧"),
             ("freee_get", "freeeの任意APIを読み取り（全情報）"),
             ("freee_list_paths", "freeeの読み取り可能なパス一覧"),
