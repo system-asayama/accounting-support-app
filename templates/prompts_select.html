@@ -4,7 +4,7 @@
 <div class="card">
   <h1>チェック手順 - 対象を選択</h1>
   <p class="muted">
-    チェックする顧問先と対象月を選ぶと、その内容が埋め込まれた指示文（プロンプト）が表示されます。
+    チェックする顧問先と対象期間を選ぶと、その内容が埋め込まれた指示文（プロンプト）が表示されます。
     コピーして各AIに貼るだけで、取り込みからチェック・記録まで実行されます。
   </p>
 
@@ -18,13 +18,46 @@
       {% endfor %}
     </datalist>
     {% if suggestions %}
-    <p class="muted" style="margin:6px 0 0;">freee上の顧問先 {{ suggestions | length }} 件から検索できます。</p>
+    <p class="muted" style="margin:6px 0 0;">
+      freee上の顧問先 {{ suggestions | length }} 件から検索できます。
+      選ぶと対象期間に<strong>最新の事業年度</strong>が自動セットされます。
+    </p>
     {% endif %}
 
-    <label for="month">対象月</label>
-    <input id="month" name="month" type="month" value="{{ default_month }}">
+    <label>対象期間</label>
+    <div class="row" style="align-items:center;">
+      <input id="start_date" name="start_date" type="date" value="{{ default_start }}" style="flex:1;">
+      <span class="muted">〜</span>
+      <input id="end_date" name="end_date" type="date" value="{{ default_end }}" style="flex:1;">
+    </div>
+    <p class="muted" id="period-note" style="margin:4px 0 0;">初期値は先月です。自由に変更できます。</p>
 
     <button type="submit">この内容でプロンプトを表示</button>
   </form>
 </div>
+
+<script>
+  var NAME_TO_ID = {{ name_to_id_json | safe }};
+  var input = document.getElementById('company_name');
+  input.addEventListener('change', function () {
+    var id = NAME_TO_ID[this.value.trim()];
+    if (!id) return;
+    var note = document.getElementById('period-note');
+    note.textContent = '事業年度を取得中…';
+    fetch('{{ url_for('api_company_period') }}?company_id=' + id)
+      .then(function (r) { return r.json(); })
+      .then(function (j) {
+        if (j.start_date && j.end_date) {
+          document.getElementById('start_date').value = j.start_date;
+          document.getElementById('end_date').value = j.end_date;
+          note.textContent = '最新の事業年度（' + j.start_date + ' 〜 ' + j.end_date + '）をセットしました。変更も可能です。';
+        } else {
+          note.textContent = '事業年度を取得できませんでした。期間を手動で指定してください。';
+        }
+      })
+      .catch(function () {
+        note.textContent = '事業年度を取得できませんでした。期間を手動で指定してください。';
+      });
+  });
+</script>
 {% endblock %}

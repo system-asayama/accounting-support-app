@@ -13,6 +13,7 @@ from functools import wraps
 from flask import (
     Flask,
     flash,
+    jsonify,
     redirect,
     render_template,
     request,
@@ -919,7 +920,9 @@ def _register_routes(app: Flask) -> None:
         from sqlalchemy import func
 
         company_name = (request.args.get("company_name") or "").strip()
-        month = (request.args.get("month") or "").strip()  # yyyy-mm
+        month = (request.args.get("month") or "").strip()  # yyyy-mm（旧形式の互換）
+        arg_start = (request.args.get("start_date") or "").strip()
+        arg_end = (request.args.get("end_date") or "").strip()
 
         # freee 上の全顧問先を候補にする（接続済みならライブ取得）
         fc = FreeeConnection.get()
@@ -952,32 +955,37 @@ def _register_routes(app: Flask) -> None:
 
         suggestions = sorted(name_to_id.keys())
 
-        # 未選択なら選択画面（既定の対象月は先月）
+        # 未選択なら選択画面（既定の対象期間は先月＝顧問先選択で最新の事業年度に自動更新）
         if not company_name:
             today = datetime.utcnow()
             y, m = (today.year, today.month - 1) if today.month > 1 else (today.year - 1, 12)
-            default_month = f"{y:04d}-{m:02d}"
+            last = calendar.monthrange(y, m)[1]
             return render_template(
                 "prompts_select.html",
                 suggestions=suggestions,
-                default_month=default_month,
+                name_to_id_json=json.dumps(name_to_id, ensure_ascii=True).replace(
+                    "<", "\\u003c"
+                ),
+                default_start=f"{y:04d}-{m:02d}-01",
+                default_end=f"{y:04d}-{m:02d}-{last:02d}",
             )
 
         # 名前が候補と完全一致すれば company_id を埋め込む（それ以外はAIが find_company で特定）
         company_id = name_to_id.get(company_name)
 
-        # 期間の確定（対象月 → 月初〜月末）
-        start_date = end_date = ""
-        period_label = "全期間"
-        if month:
+        # 期間の確定（start/end 指定を優先。旧形式 month は月初〜月末に展開）
+        start_date, end_date = arg_start, arg_end
+        if not (start_date and end_date) and month:
             try:
                 y, m = (int(x) for x in month.split("-"))
                 last = calendar.monthrange(y, m)[1]
                 start_date = f"{y:04d}-{m:02d}-01"
                 end_date = f"{y:04d}-{m:02d}-{last:02d}"
-                period_label = f"{y}年{m}月（{start_date}〜{end_date}）"
             except (ValueError, TypeError):
                 pass
+        period_label = (
+            f"{start_date} 〜 {end_date}" if (start_date and end_date) else "全期間"
+        )
 
         check_prompts = build_check_prompts(
             company_name, company_id, start_date, end_date
@@ -1026,6 +1034,33 @@ def _register_routes(app: Flask) -> None:
             endpoint=endpoint,
             has_secret=bool(secret),
             tools=tools,
+        )
+
+    @app.route("/api/company-period")
+    @login_required
+    def api_company_period():
+        """事業所マスターの最新の事業年度（会計期間）を返す（チェック手順の初期値用）。"""
+        cid = (request.args.get("company_id") or "").strip()
+        if not cid.isdigit():
+            return jsonify({"error": "company_id が不正です"}), 400
+        conn = FreeeConnection.get()
+        if not conn.is_connected:
+            return jsonify({"error": "freee 未連携"}), 400
+        try:
+            data = freee_client.api_get(conn, f"/api/1/companies/{cid}")
+        except freee_client.FreeeError as exc:
+            return jsonify({"error": str(exc)}), 502
+        company = data.get("company") or {}
+        years = [
+            fy
+            for fy in (company.get("fiscal_years") or [])
+            if fy.get("start_date") and fy.get("end_date")
+        ]
+        if not years:
+            return jsonify({"start_date": None, "end_date": None})
+        latest = max(years, key=lambda fy: fy["start_date"])
+        return jsonify(
+            {"start_date": latest["start_date"], "end_date": latest["end_date"]}
         )
 
     @app.route("/analyses")
