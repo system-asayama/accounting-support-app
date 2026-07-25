@@ -1,0 +1,37 @@
+{% extends "base.html" %}
+{% block title %}チェック手順 - 対象を選択{% endblock %}
+{% block content %}
+<div class="card">
+  <h1>チェック手順 - 対象を選択</h1>
+  <p class="muted">
+    チェックする事業所（顧問先）と対象月を選ぶと、その内容が埋め込まれた指示文（プロンプト）が表示されます。
+    コピーして各AIに貼るだけで実行できます。
+  </p>
+
+  <form method="get" action="{{ url_for('prompts') }}">
+    {% if companies %}
+    <label for="picked">事業所（取り込み済みから選ぶ）</label>
+    <select id="picked" name="picked">
+      <option value="">-- 選択してください --</option>
+      {% for c in companies %}
+        <option value="{{ c.id }}|{{ c.name }}">{{ c.name }}</option>
+      {% endfor %}
+    </select>
+    <p class="muted" style="margin:6px 0 0;">または、まだ取り込んでいない顧問先は下に名前を入力：</p>
+    {% else %}
+    <p class="muted">まだ取り込み済みの事業所がありません。顧問先名を入力してください：</p>
+    {% endif %}
+
+    <label for="company_name">顧問先名（自由入力）</label>
+    <input id="company_name" name="company_name" placeholder="例: 株式会社ブルースカイ">
+
+    <label for="month">対象月</label>
+    <input id="month" name="month" type="month" value="{{ default_month }}">
+
+    <button type="submit">この内容でプロンプトを表示</button>
+  </form>
+  <p class="muted" style="margin-top:10px;">
+    ※ 名前を入力した場合、AIが find_company で事業所を特定してから作業します。
+  </p>
+</div>
+{% endblock %}

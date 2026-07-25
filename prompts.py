@@ -1,8 +1,7 @@
 """各AIへ配布するチェック用プロンプトの雛形と、各AIアプリのURL。
 
-このアプリ（accounting-support-app）を MCP サーバーとして接続した AI に対し、
-同じ観点でチェックさせるための定型文を提供する。3社（Claude / ChatGPT / Gemini）へ
-同じ雛形を渡し、結果を「解析比較」画面で見比べる運用を想定。
+「事業所（顧問先）と期間を選ぶ → その内容が埋め込まれた指示文を表示」する形で使う。
+3社（Claude / ChatGPT / Gemini）へ同じ雛形を渡し、結果を「解析比較」で見比べる。
 """
 
 # 各AIのアプリを開くためのURL（新規タブ）
@@ -12,66 +11,95 @@ AI_APPS = [
     {"name": "Gemini", "url": "https://gemini.google.com/app", "hint": "Gemini CLI 等"},
 ]
 
-# 全プロンプト共通の前置き（MCP接続前提と、結果の書き戻し方）
-_COMMON = (
-    "あなたは会計レビュー担当です。接続されている MCP サーバー "
-    "「accounting-support-app」のツールだけを使って作業してください。\n"
-    "判断結果は必ず write_analysis で書き戻すこと。その際:\n"
-    "- ai_name にはあなたのモデル名（例: Claude / ChatGPT / Gemini）を入れる\n"
-    "- verdict は ok / warning / error のいずれか\n"
-    "- result には判断根拠を日本語で簡潔に書く\n"
-)
 
-CHECK_PROMPTS = [
-    {
-        "key": "duplicate",
-        "title": "仕訳の重複チェック",
-        "check_type": "duplicate",
-        "body": _COMMON
-        + (
-            "\n【タスク】仕訳の重複チェック\n"
-            "手順:\n"
-            "1. find_duplicate_candidates を呼び、発生日・金額・取引先が一致する重複候補グループを取得する。\n"
-            "2. 各グループについて get_deal で明細を確認し、二重計上の重複か／正当な別取引かを判断する。\n"
-            "3. 各グループの代表 deal_id に対して write_analysis(check_type=\"duplicate\") で記録する。\n"
-            "   - 重複の疑いが強い → verdict=\"warning\"、どの deal_id と重複か根拠を書く\n"
-            "   - 問題なし → verdict=\"ok\"、別取引と判断した理由を書く\n"
-        ),
-    },
-    {
-        "key": "receipt_link",
-        "title": "領収書・レシートの紐付けチェック",
-        "check_type": "receipt_link",
-        "body": _COMMON
-        + (
-            "\n【タスク】領収書・レシートの紐付けチェック\n"
-            "手順:\n"
-            "1. list_deals_without_receipt で、証憑が紐付いていない取引を取得する。\n"
-            "2. list_receipts(only_unlinked=True) で、どの取引にも紐付いていない証憑を取得する。\n"
-            "3. 各取引について、金額・勘定科目から本来証憑の添付が必要かを評価し、\n"
-            "   write_analysis(check_type=\"receipt_link\") で記録する。\n"
-            "   - 証憑を添付すべき → verdict=\"warning\"\n"
-            "   - 添付不要または問題なし → verdict=\"ok\"\n"
-            "   - 未紐付けの証憑があれば、どの取引に紐付けるべきかの候補も result に書く\n"
-        ),
-    },
-    {
-        "key": "ocr",
-        "title": "領収書・レシートの読み取り（OCR）結果チェック",
-        "check_type": "ocr",
-        "body": _COMMON
-        + (
-            "\n【タスク】領収書・レシートのOCR読み取り結果チェック\n"
-            "手順:\n"
-            "1. list_deals で証憑が紐付いている取引（has_receipt=true）を確認する。\n"
-            "2. その取引について check_receipt_ocr(deal_id) を呼び、取引値とOCR値（取引先・日付・金額）の\n"
-            "   不一致フラグ(flags)を確認する。\n"
-            "3. 不一致があれば原因を推測し（入力ミス／別証憑の紐付け／税込・税抜の差 など）、\n"
-            "   write_analysis(check_type=\"ocr\") で記録する。\n"
-            "   - 明確な不一致 → verdict=\"error\"\n"
-            "   - 軽微・要確認 → verdict=\"warning\"\n"
-            "   - 一致・問題なし → verdict=\"ok\"\n"
-            "   - result に不一致の内容と考えられる原因を書く\n"
-        ),
-    },
-]
+def _preamble(company_name: str, company_id, start_date: str, end_date: str) -> str:
+    """全プロンプト共通の前置き（対象・準備手順・書き戻しルール）。"""
+    if company_id:
+        id_line = f"（company_id={company_id}。find_company の確認は不要です）"
+    else:
+        id_line = "（company_id 不明。まず find_company で特定してください）"
+
+    if start_date and end_date:
+        period = f"{start_date} 〜 {end_date}"
+        import_line = (
+            f'2. import_deals(company_id, start_date="{start_date}", '
+            f'end_date="{end_date}") で取引と証憑（OCR結果）を取り込む。\n'
+        )
+    else:
+        period = "全期間"
+        import_line = "2. import_deals(company_id) で取引を取り込む。\n"
+
+    return (
+        "あなたは会計レビュー担当です。接続されている MCP サーバー "
+        "「accounting-support-app」のツールだけを使って作業してください。\n"
+        f"対象事業所: {company_name} {id_line}\n"
+        f"対象期間: {period}\n"
+        "\n"
+        "準備:\n"
+        f'1. find_company("{company_name}") で company_id を特定する。\n'
+        + import_line
+        + "3. 以降のツール呼び出しには必ず company_id を渡すこと。\n"
+        "\n"
+        "記録のルール: 判断結果は必ず write_analysis で書き戻すこと。\n"
+        "- ai_name にはあなたのモデル名（例: Claude / ChatGPT / Gemini）を入れる\n"
+        "- verdict は ok / warning / error のいずれか\n"
+        "- result には判断根拠を日本語で簡潔に書く\n"
+    )
+
+
+def build_check_prompts(
+    company_name: str, company_id=None, start_date: str = "", end_date: str = ""
+) -> list:
+    """事業所・期間を埋め込んだ3チェックの指示文を返す。"""
+    pre = _preamble(company_name, company_id, start_date, end_date)
+    return [
+        {
+            "key": "duplicate",
+            "title": "仕訳の重複チェック",
+            "check_type": "duplicate",
+            "body": pre
+            + (
+                "\n【タスク】仕訳の重複チェック\n"
+                "手順:\n"
+                "1. find_duplicate_candidates(company_id) で、発生日・金額・取引先が一致する重複候補グループを取得する。\n"
+                "2. 各グループについて get_deal で明細を確認し、二重計上の重複か／正当な別取引（出荷ごとの送料・決済ごとの手数料など）かを判断する。\n"
+                "3. グループごとに代表の deal_id へ write_analysis(check_type=\"duplicate\") で記録する。\n"
+                "   - 重複の疑いが強い → verdict=\"warning\"、どの deal_id と重複か根拠を書く\n"
+                "   - 問題なし → verdict=\"ok\"、別取引と判断した理由を書く\n"
+            ),
+        },
+        {
+            "key": "receipt_link",
+            "title": "領収書・レシートの紐付けチェック",
+            "check_type": "receipt_link",
+            "body": pre
+            + (
+                "\n【タスク】領収書・レシートの紐付けチェック\n"
+                "手順:\n"
+                "1. list_deals_without_receipt(company_id) で、証憑が紐付いていない取引を取得する。\n"
+                "2. list_receipts(company_id, only_unlinked=True) で、どの取引にも紐付いていない証憑を取得する。\n"
+                "3. 金額の大きい取引を優先して、本来証憑の添付が必要かを評価し、\n"
+                "   write_analysis(check_type=\"receipt_link\") で記録する。\n"
+                "   - 証憑を添付すべき → verdict=\"warning\"\n"
+                "   - 添付不要または問題なし → verdict=\"ok\"\n"
+                "   - 未紐付けの証憑があれば、どの取引に紐付けるべきかの候補も result に書く\n"
+            ),
+        },
+        {
+            "key": "ocr",
+            "title": "領収書・レシートの読み取り（OCR）結果チェック",
+            "check_type": "ocr",
+            "body": pre
+            + (
+                "\n【タスク】領収書・レシートのOCR読み取り結果チェック\n"
+                "手順:\n"
+                "1. list_deals(company_id) で証憑が紐付いている取引（has_receipt=true）を確認する。\n"
+                "2. その取引について check_receipt_ocr(deal_id, company_id) を呼び、取引値とOCR値（取引先・日付・金額）の不一致フラグ(flags)を確認する。\n"
+                "3. 不一致があれば原因を推測し（入力ミス／別証憑の紐付け／税込・税抜の差 など）、\n"
+                "   write_analysis(check_type=\"ocr\") で記録する。\n"
+                "   - 明確な不一致 → verdict=\"error\"\n"
+                "   - 軽微・要確認 → verdict=\"warning\"\n"
+                "   - 一致・問題なし → verdict=\"ok\"\n"
+            ),
+        },
+    ]

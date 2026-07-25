@@ -2,10 +2,14 @@
 {% block title %}チェック手順{% endblock %}
 {% block content %}
 <div class="card">
-  <h1>チェック手順（各AIへの指示雛形）</h1>
+  <h1>チェック手順（各AIへの指示文）</h1>
   <p class="muted">
-    下の定型文をコピーして、各AI（Claude / ChatGPT / Gemini）に同じ観点で指示します。
-    各AIはこのアプリのMCPツールを使ってチェックし、結果を書き戻します。
+    対象: <strong>{{ company_name }}</strong> ／ {{ period_label }}
+    ・<a class="link" href="{{ url_for('prompts') }}">対象を変更</a>
+  </p>
+  <p class="muted">
+    下の指示文には対象事業所と期間が埋め込まれています。コピーして各AI（Claude / ChatGPT / Gemini）に
+    そのまま貼るだけで、取り込み→チェック→記録まで実行されます。
     集まった結果は<a class="link" href="{{ url_for('analyses') }}">解析比較</a>で見比べられます。
   </p>
 
@@ -19,7 +23,7 @@
   </div>
   <p class="muted" style="margin-top:8px;">
     ※ 事前に各AIへ MCP サーバー「accounting-support-app」を接続しておいてください
-    （Claude Code / Gemini CLI はローカル接続、ChatGPT は開発者モードで公開HTTPSのリモート接続）。
+    （接続URLと設定手順は<a class="link" href="{{ url_for('mcp_info') }}">MCP接続</a>ページ）。
   </p>
 </div>
 

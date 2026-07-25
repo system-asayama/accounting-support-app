@@ -23,7 +23,7 @@ from flask import (
 import freee_client
 import mf_client
 from broadcast_service import BroadcastError, run_broadcast
-from prompts import AI_APPS, CHECK_PROMPTS
+from prompts import AI_APPS, build_check_prompts
 from models import (
     DEFAULT_MODEL,
     PROVIDER_DEFAULT_MODEL,
@@ -892,8 +892,72 @@ def _register_routes(app: Flask) -> None:
     @app.route("/prompts")
     @login_required
     def prompts():
-        """各AIへ配布するチェック用プロンプトの雛形を表示する。"""
-        return render_template("prompts.html", check_prompts=CHECK_PROMPTS)
+        """チェック手順。まず事業所（顧問先）と期間を選び、それを埋め込んだ指示文を表示する。"""
+        import calendar
+
+        from sqlalchemy import func
+
+        picked = (request.args.get("picked") or "").strip()  # "company_id|名前"
+        free_name = (request.args.get("company_name") or "").strip()
+        month = (request.args.get("month") or "").strip()  # yyyy-mm
+
+        # 取り込み済みの freee 事業所（選択肢）
+        rows = (
+            db.session.query(
+                ImportedDeal.company_id, func.max(ImportedDeal.scope_name)
+            )
+            .filter(
+                ImportedDeal.source == SOURCE_FREEE,
+                ImportedDeal.company_id.isnot(None),
+            )
+            .group_by(ImportedDeal.company_id)
+            .all()
+        )
+        companies = [
+            {"id": cid, "name": nm or f"ID:{cid}"} for cid, nm in rows
+        ]
+        companies.sort(key=lambda x: x["name"])
+
+        # 未選択なら選択画面（既定の対象月は先月）
+        if not (picked or free_name):
+            today = datetime.utcnow()
+            y, m = (today.year, today.month - 1) if today.month > 1 else (today.year - 1, 12)
+            default_month = f"{y:04d}-{m:02d}"
+            return render_template(
+                "prompts_select.html", companies=companies, default_month=default_month
+            )
+
+        # 対象の確定
+        company_id = None
+        if free_name:
+            company_name = free_name
+        else:
+            cid, _, nm = picked.partition("|")
+            company_id = cid or None
+            company_name = nm or cid
+
+        # 期間の確定（対象月 → 月初〜月末）
+        start_date = end_date = ""
+        period_label = "全期間"
+        if month:
+            try:
+                y, m = (int(x) for x in month.split("-"))
+                last = calendar.monthrange(y, m)[1]
+                start_date = f"{y:04d}-{m:02d}-01"
+                end_date = f"{y:04d}-{m:02d}-{last:02d}"
+                period_label = f"{y}年{m}月（{start_date}〜{end_date}）"
+            except (ValueError, TypeError):
+                pass
+
+        check_prompts = build_check_prompts(
+            company_name, company_id, start_date, end_date
+        )
+        return render_template(
+            "prompts.html",
+            check_prompts=check_prompts,
+            company_name=company_name,
+            period_label=period_label,
+        )
 
     @app.route("/mcp-info")
     @login_required
