@@ -1166,21 +1166,48 @@ def _register_routes(app: Flask) -> None:
             items = []
             for d in deals:
                 anas = [a for a in d.analyses if (a.check_type or "general") == ct]
-                if anas:
-                    items.append({"deal": d, "analyses": anas})
+                if not anas:
+                    continue
+                # AIごとに時系列でまとめ、最新の記録を代表にする。
+                # 過去に warning/error → 最新が ok なら「改善済み」。
+                by_ai = {}
+                for a in sorted(anas, key=lambda a: (a.created_at or datetime.min, a.id)):
+                    by_ai.setdefault(a.ai_name, []).append(a)
+                ai_results = []
+                for ai_name, hist in by_ai.items():
+                    latest = hist[-1]
+                    past = hist[:-1]
+                    improved = latest.verdict == "ok" and any(
+                        p.verdict in ("warning", "error") for p in past
+                    )
+                    ai_results.append(
+                        {
+                            "ai_name": ai_name,
+                            "latest": latest,
+                            "history": list(reversed(past)),
+                            "improved": improved,
+                        }
+                    )
+                has_warning = any(
+                    r["latest"].verdict in ("warning", "error") for r in ai_results
+                )
+                improved_any = any(r["improved"] for r in ai_results)
+                items.append(
+                    {
+                        "deal": d,
+                        "ai_results": ai_results,
+                        "has_warning": has_warning,
+                        "improved": improved_any and not has_warning,
+                    }
+                )
             if not items:
                 continue
-            # ⚠️指摘あり → ✅OK（各グループ内は日付降順のまま）
+            # ⚠️指摘あり → ✨改善済み → ✅OK（各グループ内は日付降順のまま）
             items.sort(
-                key=lambda it: 0
-                if any(a.verdict in ("warning", "error") for a in it["analyses"])
-                else 1
+                key=lambda it: 0 if it["has_warning"] else (1 if it["improved"] else 2)
             )
-            warning_count = sum(
-                1
-                for it in items
-                if any(a.verdict in ("warning", "error") for a in it["analyses"])
-            )
+            warning_count = sum(1 for it in items if it["has_warning"])
+            improved_count = sum(1 for it in items if it["improved"])
             sections.append(
                 {
                     "key": ct,
@@ -1188,6 +1215,7 @@ def _register_routes(app: Flask) -> None:
                     "rows": items,
                     "count": len(items),
                     "warning_count": warning_count,
+                    "improved_count": improved_count,
                 }
             )
 

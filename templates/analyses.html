@@ -8,7 +8,8 @@
     ・<a class="link" href="{{ url_for('analyses', select=1) }}">別の事業所を選ぶ</a>
   </p>
   <p class="muted">
-    チェックのカテゴリごとに分けて表示します。各カテゴリ内は ⚠️ 指摘あり → ✅ OK の順です。
+    チェックのカテゴリごとに分けて表示します。各カテゴリ内は ⚠️ 指摘あり → ✨ 改善済み → ✅ OK の順です。
+    再チェックで指摘が解消した取引には「✨改善済み」が付きます（過去の記録も折りたたみで残ります）。
   </p>
 
   {% if sections %}
@@ -17,7 +18,7 @@
     {% for sec in sections %}
       <a href="#sec-{{ sec.key }}">
         <button type="button" class="small {% if not sec.warning_count %}secondary{% endif %}">
-          {{ sec.title }}（{% if sec.warning_count %}⚠️{{ sec.warning_count }}／{% endif %}{{ sec.count }}件）
+          {{ sec.title }}（{% if sec.warning_count %}⚠️{{ sec.warning_count }}／{% endif %}{% if sec.improved_count %}✨{{ sec.improved_count }}／{% endif %}{{ sec.count }}件）
         </button>
       </a>
     {% endfor %}
@@ -52,6 +53,7 @@
 <div class="card" id="sec-{{ sec.key }}">
   <h1>{{ sec.title }}
     {% if sec.warning_count %}<span class="badge error">⚠️ 指摘 {{ sec.warning_count }}件</span>{% endif %}
+    {% if sec.improved_count %}<span class="badge success">✨ 改善済み {{ sec.improved_count }}件</span>{% endif %}
     <span class="badge user">対象 {{ sec.count }}件</span>
   </h1>
 
@@ -73,17 +75,39 @@
       <span class="muted">{{ d.account_items or '' }}</span>
     </div>
 
+    {% if it.improved %}
+    <p style="margin:8px 0 0;"><span class="badge success">✨ 改善済み</span>
+      <span class="muted">以前の指摘が最新のチェックで解消されました。</span></p>
+    {% endif %}
     <div class="result-grid" style="margin-top:12px;">
-      {% for a in it.analyses %}
+      {% for r in it.ai_results %}
+      {% set a = r.latest %}
       <div class="result">
         <h3>
-          {{ a.ai_name }}
+          {{ r.ai_name }}
           {% if a.verdict == 'ok' %}<span class="badge success">{{ a.verdict }}</span>
           {% elif a.verdict in ('warning', 'error') %}<span class="badge error">{{ a.verdict }}</span>
           {% elif a.verdict %}<span class="badge user">{{ a.verdict }}</span>{% endif %}
+          {% if r.improved %}<span class="badge success">✨改善済み</span>{% endif %}
         </h3>
         <p class="muted" style="margin:0;">{{ a.created_at.strftime('%Y-%m-%d %H:%M') }}</p>
         <pre>{{ a.result }}</pre>
+        {% if r.history %}
+        <details style="margin-top:6px;">
+          <summary class="muted" style="cursor:pointer;">過去の記録（{{ r.history | length }}件）</summary>
+          {% for h in r.history %}
+          <div style="margin-top:8px; padding-left:8px; border-left:2px solid var(--border, #ddd);">
+            <p class="muted" style="margin:0;">
+              {{ h.created_at.strftime('%Y-%m-%d %H:%M') }}
+              {% if h.verdict == 'ok' %}<span class="badge success">{{ h.verdict }}</span>
+              {% elif h.verdict in ('warning', 'error') %}<span class="badge error">{{ h.verdict }}</span>
+              {% elif h.verdict %}<span class="badge user">{{ h.verdict }}</span>{% endif %}
+            </p>
+            <pre>{{ h.result }}</pre>
+          </div>
+          {% endfor %}
+        </details>
+        {% endif %}
       </div>
       {% endfor %}
     </div>
