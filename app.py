@@ -918,53 +918,53 @@ def _register_routes(app: Flask) -> None:
 
         from sqlalchemy import func
 
-        picked = (request.args.get("picked") or "").strip()  # "company_id|名前"
-        free_name = (request.args.get("company_name") or "").strip()
+        company_name = (request.args.get("company_name") or "").strip()
         month = (request.args.get("month") or "").strip()  # yyyy-mm
 
-        # 取り込み済みの freee 事業所（選択肢）
-        rows = (
-            db.session.query(
-                ImportedDeal.company_id, func.max(ImportedDeal.scope_name)
-            )
-            .filter(
-                ImportedDeal.source == SOURCE_FREEE,
-                ImportedDeal.company_id.isnot(None),
-            )
-            .group_by(ImportedDeal.company_id)
-            .all()
-        )
+        # freee 上の全顧問先を候補にする（接続済みならライブ取得）
         fc = FreeeConnection.get()
+        name_to_id = {}
+        try:
+            if fc.is_connected:
+                for c in freee_client.list_companies(fc):
+                    disp = (c.get("display_name") or c.get("name") or "").strip()
+                    if disp:
+                        name_to_id[disp] = c.get("id")
+        except freee_client.FreeeError:
+            pass
+        # 未接続・取得失敗時は取り込み済みデータの名前を候補にする
+        if not name_to_id:
+            rows = (
+                db.session.query(
+                    ImportedDeal.company_id, func.max(ImportedDeal.scope_name)
+                )
+                .filter(
+                    ImportedDeal.source == SOURCE_FREEE,
+                    ImportedDeal.company_id.isnot(None),
+                )
+                .group_by(ImportedDeal.company_id)
+                .all()
+            )
+            for cid, nm in rows:
+                label = nm or (fc.company_name if fc.company_id == cid else None)
+                if label:
+                    name_to_id[label] = cid
 
-        def company_label(cid, nm):
-            if nm:
-                return nm
-            if fc.company_id == cid and fc.company_name:
-                return fc.company_name
-            return f"ID:{cid}"
-
-        companies = [
-            {"id": cid, "name": company_label(cid, nm)} for cid, nm in rows
-        ]
-        companies.sort(key=lambda x: x["name"])
+        suggestions = sorted(name_to_id.keys())
 
         # 未選択なら選択画面（既定の対象月は先月）
-        if not (picked or free_name):
+        if not company_name:
             today = datetime.utcnow()
             y, m = (today.year, today.month - 1) if today.month > 1 else (today.year - 1, 12)
             default_month = f"{y:04d}-{m:02d}"
             return render_template(
-                "prompts_select.html", companies=companies, default_month=default_month
+                "prompts_select.html",
+                suggestions=suggestions,
+                default_month=default_month,
             )
 
-        # 対象の確定
-        company_id = None
-        if free_name:
-            company_name = free_name
-        else:
-            cid, _, nm = picked.partition("|")
-            company_id = cid or None
-            company_name = nm or cid
+        # 名前が候補と完全一致すれば company_id を埋め込む（それ以外はAIが find_company で特定）
+        company_id = name_to_id.get(company_name)
 
         # 期間の確定（対象月 → 月初〜月末）
         start_date = end_date = ""
