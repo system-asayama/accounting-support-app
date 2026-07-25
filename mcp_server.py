@@ -792,9 +792,11 @@ def import_deals(
     チェックツール（find_duplicate_candidates 等）や write_analysis は取り込み済み
     データが対象のため、チェック前にこのツールで対象顧問先のデータを取り込む。
     - company_id: find_company で取得した事業所ID
-    - start_date / end_date: 発生日の範囲 (yyyy-mm-dd)。両方指定すると証憑も取り込む
+    - start_date / end_date: 発生日の範囲 (yyyy-mm-dd)。省略時は取り込んだ取引の
+      発生日から自動決定して証憑も必ず取り込む
     - deal_type: "income" / "expense"（省略で全て）
     - max_deals: 取り込み上限（既定500）
+    実行後は取引・証憑・OCR結果が揃い、そのまま check_receipt_ocr まで実行できる。
     """
     with SessionLocal() as s:
         conn = s.get(FreeeConnection, 1)
@@ -876,44 +878,104 @@ def import_deals(
             if len(deals) < 100:
                 break
 
-        # 証憑（期間指定時のみ）
-        receipts_imported = 0
-        if start_date and end_date:
-            rec = _freee_api(
-                s,
-                conn,
-                "/api/1/receipts",
-                {"company_id": company_id, "start_date": start_date, "end_date": end_date, "limit": 100},
+        def store_receipt(r: dict) -> None:
+            meta = r.get("receipt_metadatum") or {}
+            amount = meta.get("amount")
+            ir = (
+                s.query(ImportedReceipt)
+                .filter(
+                    ImportedReceipt.scope_key == scope_key,
+                    ImportedReceipt.receipt_id == r["id"],
+                )
+                .first()
             )
-            if "error" not in rec:
-                for r in rec.get("receipts", []):
-                    meta = r.get("receipt_metadatum") or {}
-                    amount = meta.get("amount")
-                    ir = (
-                        s.query(ImportedReceipt)
-                        .filter(
-                            ImportedReceipt.scope_key == scope_key,
-                            ImportedReceipt.receipt_id == r["id"],
-                        )
-                        .first()
-                    )
-                    if ir is None:
-                        ir = ImportedReceipt(receipt_id=r["id"])
-                        s.add(ir)
-                    ir.source = SOURCE_FREEE
-                    ir.scope_key = scope_key
-                    ir.company_id = company_id
-                    ir.status = r.get("status")
-                    ir.description = (r.get("description") or "")[:255] or None
-                    ir.document_type = r.get("document_type")
-                    ir.origin = r.get("origin")
-                    ir.created_at = r.get("created_at")
-                    ir.ocr_partner_name = meta.get("partner_name") or None
-                    ir.ocr_issue_date = meta.get("issue_date") or None
-                    ir.ocr_amount = int(amount) if isinstance(amount, (int, float)) else None
-                    ir.metadatum_json = json.dumps(meta, ensure_ascii=False)
-                    ir.imported_at = datetime.utcnow()
-                    receipts_imported += 1
+            if ir is None:
+                ir = ImportedReceipt(receipt_id=r["id"])
+                s.add(ir)
+            ir.source = SOURCE_FREEE
+            ir.scope_key = scope_key
+            ir.company_id = company_id
+            ir.status = r.get("status")
+            ir.description = (r.get("description") or "")[:255] or None
+            ir.document_type = r.get("document_type")
+            ir.origin = r.get("origin")
+            ir.created_at = r.get("created_at")
+            ir.ocr_partner_name = meta.get("partner_name") or None
+            ir.ocr_issue_date = meta.get("issue_date") or None
+            ir.ocr_amount = int(amount) if isinstance(amount, (int, float)) else None
+            ir.metadatum_json = json.dumps(meta, ensure_ascii=False)
+            ir.imported_at = datetime.utcnow()
+
+        # 証憑は常に取り込む。期間未指定なら取り込んだ取引の発生日から範囲を自動決定する
+        # （freee の /receipts は start_date / end_date が必須のため）。
+        receipts_imported = 0
+        r_start, r_end = start_date, end_date
+        if not (r_start and r_end):
+            from sqlalchemy import func as _func
+
+            span = (
+                s.query(
+                    _func.min(ImportedDeal.issue_date),
+                    _func.max(ImportedDeal.issue_date),
+                )
+                .filter(ImportedDeal.scope_key == scope_key)
+                .first()
+            )
+            if span and span[0] and span[1]:
+                r_start, r_end = str(span[0]), str(span[1])
+        if r_start and r_end:
+            r_offset = 0
+            while r_offset < 2000:
+                rec = _freee_api(
+                    s,
+                    conn,
+                    "/api/1/receipts",
+                    {
+                        "company_id": company_id,
+                        "start_date": r_start,
+                        "end_date": r_end,
+                        "limit": 100,
+                        "offset": r_offset,
+                    },
+                )
+                if "error" in rec:
+                    break
+                receipts = rec.get("receipts", [])
+                if not receipts:
+                    break
+                for r in receipts:
+                    if r.get("id"):
+                        store_receipt(r)
+                        receipts_imported += 1
+                r_offset += 100
+                if len(receipts) < 100:
+                    break
+        s.flush()
+
+        # 取引に紐付いているのに一覧に出てこなかった証憑（発生日が期間外 等）はID指定で個別取得し、
+        # check_receipt_ocr が「証憑が未取り込み」にならないようにする。
+        linked_ids = set()
+        for d_row in (
+            s.query(ImportedDeal).filter(ImportedDeal.scope_key == scope_key).all()
+        ):
+            linked_ids.update(d_row.receipt_ids)
+        existing_ids = {
+            rid
+            for (rid,) in s.query(ImportedReceipt.receipt_id)
+            .filter(ImportedReceipt.scope_key == scope_key)
+            .all()
+        }
+        receipts_fetched_individually = 0
+        for rid in sorted(linked_ids - existing_ids)[:200]:
+            one = _freee_api(
+                s, conn, f"/api/1/receipts/{rid}", {"company_id": company_id}
+            )
+            if "error" in one:
+                continue
+            r = one.get("receipt") or {}
+            if r.get("id"):
+                store_receipt(r)
+                receipts_fetched_individually += 1
 
         s.commit()
         return {
@@ -922,7 +984,9 @@ def import_deals(
             "deals_created": created,
             "deals_updated": updated,
             "receipts_imported": receipts_imported,
-            "note": "以降のチェックツールには company_id を渡してください。",
+            "receipts_fetched_individually": receipts_fetched_individually,
+            "receipt_period": {"start_date": r_start or None, "end_date": r_end or None},
+            "note": "取引・証憑（OCR結果）を取り込みました。以降のチェックツールには company_id を渡してください。",
         }
 
 
