@@ -197,6 +197,7 @@ class ImportedDeal(db.Model):
     scope_key = db.Column(db.String(120), nullable=True, index=True)
     company_id = db.Column(db.BigInteger, nullable=True, index=True)  # freee 事業所ID
     office_id = db.Column(db.String(80), nullable=True)  # MF 事業所ID
+    scope_name = db.Column(db.String(255), nullable=True)  # 事業所名スナップショット
     deal_id = db.Column(db.BigInteger, nullable=False)  # ソース上の取引ID
     issue_date = db.Column(db.String(20), nullable=True)
     deal_type = db.Column(db.String(20), nullable=True)  # income / expense

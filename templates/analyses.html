@@ -4,8 +4,11 @@
 <div class="card">
   <h1>解析比較（各AIの結果）</h1>
   <p class="muted">
-    取り込んだ取引に対して、各AI（Claude / ChatGPT / Gemini）が MCP 経由で書き込んだ解析結果を並べて比較します。
-    {% if scope_name %}事業所: <strong>{{ scope_name }}</strong>{% endif %}
+    事業所: <strong>{{ scope_name }}</strong>
+    ・<a class="link" href="{{ url_for('analyses', select=1) }}">別の事業所を選ぶ</a>
+  </p>
+  <p class="muted">
+    並び順: ⚠️ 指摘あり → ✅ OK → 未解析（各AIが MCP 経由で書き込んだ結果を比較表示）
   </p>
   <div class="inline" style="flex-wrap:wrap; gap:8px;">
     {% for app in ai_apps %}

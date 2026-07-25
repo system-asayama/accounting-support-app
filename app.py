@@ -104,6 +104,9 @@ def _ensure_schema() -> None:
     additions.append(
         ("deal_analyses", "check_type", "ALTER TABLE deal_analyses ADD COLUMN check_type VARCHAR(40)")
     )
+    additions.append(
+        ("imported_deals", "scope_name", "ALTER TABLE imported_deals ADD COLUMN scope_name VARCHAR(255)")
+    )
     # 画面から設定するアプリ情報（Client ID/Secret/リダイレクトURI）
     for tbl in ("freee_connections", "mf_connections"):
         additions.append((tbl, "client_id", f"ALTER TABLE {tbl} ADD COLUMN client_id VARCHAR(255)"))
@@ -830,6 +833,7 @@ def _register_routes(app: Flask) -> None:
                 updated += 1
             existing.source = SOURCE_FREEE
             existing.scope_key = make_scope_key(SOURCE_FREEE, company_id=conn.company_id)
+            existing.scope_name = conn.company_name
             existing.issue_date = d.get("issue_date")
             existing.deal_type = d.get("type")
             existing.amount = d.get("amount")
@@ -933,33 +937,96 @@ def _register_routes(app: Flask) -> None:
     @app.route("/analyses")
     @login_required
     def analyses():
-        """取り込んだ取引と、各AIが書き込んだ解析結果を並べて比較する。"""
-        conn = FreeeConnection.get()
-        mf = MFConnection.get()
-        # 有効な接続のスコープに絞り込む（freee を優先、無ければ MF）
-        scope_key, scope_name = None, None
-        if conn.company_id:
-            scope_key = make_scope_key(SOURCE_FREEE, company_id=conn.company_id)
-            scope_name = conn.company_name
-        elif mf.office_id:
-            scope_key = make_scope_key(SOURCE_MF, office_id=mf.office_id)
-            scope_name = mf.office_name
+        """解析比較。まず事業所（顧問先）を選び、その事業所の結果を表示する。"""
+        from sqlalchemy import case, func
 
-        query = ImportedDeal.query
-        if scope_key:
-            query = query.filter_by(scope_key=scope_key)
-        deals = query.order_by(ImportedDeal.issue_date.desc()).limit(200).all()
+        scope = (request.args.get("scope") or "").strip()
 
-        # 出現したAI名を集める（列見出し用）
-        ai_names = [
-            row[0]
-            for row in db.session.query(DealAnalysis.ai_name)
-            .distinct()
-            .order_by(DealAnalysis.ai_name)
+        # 取り込み済みデータが存在する事業所（スコープ）一覧
+        scope_rows = (
+            db.session.query(
+                ImportedDeal.scope_key,
+                func.max(ImportedDeal.scope_name),
+                func.max(ImportedDeal.source),
+                func.count(ImportedDeal.id),
+                func.max(ImportedDeal.imported_at),
+            )
+            .filter(ImportedDeal.scope_key.isnot(None))
+            .group_by(ImportedDeal.scope_key)
             .all()
+        )
+        # 解析件数・warning件数をスコープ別に集計
+        stats = {}
+        for skey, total, warns in (
+            db.session.query(
+                DealAnalysis.scope_key,
+                func.count(DealAnalysis.id),
+                func.sum(
+                    case((DealAnalysis.verdict.in_(["warning", "error"]), 1), else_=0)
+                ),
+            )
+            .group_by(DealAnalysis.scope_key)
+            .all()
+        ):
+            stats[skey] = (total or 0, int(warns or 0))
+
+        fc = FreeeConnection.get()
+        mf = MFConnection.get()
+
+        def resolve_name(skey, snap):
+            if snap:
+                return snap
+            if fc.company_id and skey == make_scope_key(SOURCE_FREEE, company_id=fc.company_id):
+                return fc.company_name
+            if mf.office_id and skey == make_scope_key(SOURCE_MF, office_id=mf.office_id):
+                return mf.office_name
+            return skey
+
+        scopes = [
+            {
+                "key": skey,
+                "name": resolve_name(skey, snap),
+                "source": src,
+                "deal_count": cnt,
+                "imported_at": imp,
+                "analysis_count": stats.get(skey, (0, 0))[0],
+                "warning_count": stats.get(skey, (0, 0))[1],
+            }
+            for skey, snap, src, cnt, imp in scope_rows
         ]
+        scopes.sort(key=lambda x: (x["imported_at"] is None, ), reverse=False)
+        scopes.sort(key=lambda x: x["name"] or "")
+
+        # スコープ未指定: 1件だけなら直行（?select=1 のときは選択画面を明示表示）
+        if not scope:
+            if len(scopes) == 1 and not request.args.get("select"):
+                return redirect(url_for("analyses", scope=scopes[0]["key"]))
+            return render_template("analyses_select.html", scopes=scopes)
+
+        selected = next((s for s in scopes if s["key"] == scope), None)
+        deals = (
+            ImportedDeal.query.filter_by(scope_key=scope)
+            .order_by(ImportedDeal.issue_date.desc())
+            .limit(300)
+            .all()
+        )
+
+        # 並び順: ⚠️指摘あり → ✅OK → 未解析（各グループ内は日付降順）
+        def severity(d):
+            verdicts = [a.verdict for a in d.analyses]
+            if any(v in ("warning", "error") for v in verdicts):
+                return 0
+            if verdicts:
+                return 1
+            return 2
+
+        deals.sort(key=lambda d: (severity(d), ), reverse=False)
+
         return render_template(
-            "analyses.html", scope_name=scope_name, deals=deals, ai_names=ai_names
+            "analyses.html",
+            scope_name=(selected["name"] if selected else scope),
+            deals=deals,
+            scopes=scopes,
         )
 
     # --- マネーフォワード クラウド会計 連携 --------------------------------
@@ -1128,6 +1195,7 @@ def _register_routes(app: Flask) -> None:
                     updated += 1
                 existing.source = SOURCE_MF
                 existing.scope_key = scope_key
+                existing.scope_name = conn.office_name
                 existing.company_id = None
                 existing.office_id = conn.office_id
                 existing.issue_date = (

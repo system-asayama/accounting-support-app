@@ -611,6 +611,13 @@ def import_deals(
         for p in par.get("partners", []) if "error" not in par else []:
             partner_map[p["id"]] = p.get("name", "")
 
+        # 事業所名スナップショット（選択画面の表示用）
+        scope_name = None
+        comp = _freee_api(s, conn, f"/api/1/companies/{company_id}", {})
+        if "error" not in comp:
+            c = comp.get("company") or {}
+            scope_name = c.get("display_name") or c.get("name")
+
         # 取引（ページング）
         scope_key = make_scope_key(SOURCE_FREEE, company_id=company_id)
         created, updated, offset = 0, 0, 0
@@ -649,6 +656,7 @@ def import_deals(
                     updated += 1
                 row.source = SOURCE_FREEE
                 row.scope_key = scope_key
+                row.scope_name = scope_name
                 row.company_id = company_id
                 row.issue_date = d.get("issue_date")
                 row.deal_type = d.get("type")

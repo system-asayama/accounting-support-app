@@ -1,0 +1,42 @@
+{% extends "base.html" %}
+{% block title %}解析比較 - 事業所を選択{% endblock %}
+{% block content %}
+<div class="card">
+  <h1>解析比較 - 事業所（顧問先）を選択</h1>
+  <p class="muted">
+    取り込み済みのデータがある事業所です。見たい事業所を選んでください。
+  </p>
+
+  {% if scopes %}
+  <div class="table-wrap">
+    <table>
+      <thead>
+        <tr><th>事業所</th><th>ソース</th><th>取引</th><th>解析</th><th>指摘</th><th>最終取込</th><th></th></tr>
+      </thead>
+      <tbody>
+        {% for s in scopes %}
+        <tr>
+          <td class="wrap"><strong>{{ s.name }}</strong></td>
+          <td><span class="badge {% if s.source == 'mf' %}admin{% else %}user{% endif %}">{{ s.source }}</span></td>
+          <td class="muted">{{ s.deal_count }} 件</td>
+          <td class="muted">{{ s.analysis_count }} 件</td>
+          <td>
+            {% if s.warning_count %}<span class="badge error">⚠️ {{ s.warning_count }}</span>
+            {% else %}<span class="muted">-</span>{% endif %}
+          </td>
+          <td class="muted">{{ s.imported_at.strftime('%m/%d %H:%M') if s.imported_at else '-' }}</td>
+          <td><a href="{{ url_for('analyses', scope=s.key) }}"><button class="small" type="button">開く</button></a></td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% else %}
+  <p class="muted">
+    まだ取り込まれたデータがありません。
+    <a class="link" href="{{ url_for('freee_deals') }}">取引データ</a>から取り込むか、
+    AIに「〇〇社の△月を取り込んでチェックして」と指示してください。
+  </p>
+  {% endif %}
+</div>
+{% endblock %}
