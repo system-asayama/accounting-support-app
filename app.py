@@ -109,6 +109,9 @@ def _ensure_schema() -> None:
     additions.append(
         ("imported_deals", "scope_name", "ALTER TABLE imported_deals ADD COLUMN scope_name VARCHAR(255)")
     )
+    additions.append(
+        ("imported_deals", "payments_json", "ALTER TABLE imported_deals ADD COLUMN payments_json TEXT")
+    )
     # 画面から設定するアプリ情報（Client ID/Secret/リダイレクトURI）
     for tbl in ("freee_connections", "mf_connections"):
         additions.append((tbl, "client_id", f"ALTER TABLE {tbl} ADD COLUMN client_id VARCHAR(255)"))
@@ -864,6 +867,9 @@ def _register_routes(app: Flask) -> None:
             existing.account_items = names or None
             existing.details_json = json.dumps(details, ensure_ascii=False)
             existing.receipt_ids = receipt_ids
+            existing.payments_json = json.dumps(
+                d.get("payments") or [], ensure_ascii=False
+            )
             existing.imported_at = datetime.utcnow()
 
         # 証憑（ファイルボックス／OCR結果）の取り込み（期間指定がある場合のみ）
@@ -1018,6 +1024,7 @@ def _register_routes(app: Flask) -> None:
             ("list_deals", "取り込んだ取引の一覧"),
             ("get_deal", "取引1件の詳細＋解析結果"),
             ("find_duplicate_candidates", "仕訳の重複候補"),
+            ("find_cross_payment_duplicates", "クレカ×現金など決済手段をまたぐ二重計上候補"),
             ("list_deals_without_receipt", "証憑が無い取引"),
             ("list_receipts", "証憑（OCR結果）一覧・紐付け漏れ"),
             ("check_receipt_ocr", "取引とOCRの突合"),

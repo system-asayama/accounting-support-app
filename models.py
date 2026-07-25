@@ -208,6 +208,9 @@ class ImportedDeal(db.Model):
     details_json = db.Column(db.Text, nullable=True)  # 明細の生データ(JSON)
     # 紐付いた証憑（ファイルボックス）ID の JSON 配列
     receipt_ids_json = db.Column(db.Text, nullable=False, default="[]")
+    # 支払行（決済口座）の生データ(JSON)。from_walletable_type に
+    # wallet(現金) / credit_card / bank_account 等が入る
+    payments_json = db.Column(db.Text, nullable=True)
     imported_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
 
     __table_args__ = (
@@ -229,6 +232,23 @@ class ImportedDeal(db.Model):
     @property
     def has_receipt(self) -> bool:
         return len(self.receipt_ids) > 0
+
+    @property
+    def wallet_types(self) -> list:
+        """決済に使われた口座区分の一覧（例: ["wallet"], ["credit_card"]）。"""
+        try:
+            data = json.loads(self.payments_json or "[]")
+        except (ValueError, TypeError):
+            return []
+        if not isinstance(data, list):
+            return []
+        return sorted(
+            {
+                p.get("from_walletable_type")
+                for p in data
+                if isinstance(p, dict) and p.get("from_walletable_type")
+            }
+        )
 
     analyses = db.relationship(
         "DealAnalysis",

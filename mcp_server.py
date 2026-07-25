@@ -88,7 +88,16 @@ def _deal_to_dict(d: ImportedDeal) -> dict:
         "account_items": d.account_items,
         "receipt_ids": d.receipt_ids,
         "has_receipt": d.has_receipt,
+        "payment_methods": d.wallet_types,
     }
+
+
+WALLET_LABELS = {
+    "wallet": "現金",
+    "credit_card": "クレジットカード",
+    "bank_account": "銀行口座",
+    "private_account_item": "プライベート資金",
+}
 
 
 def _receipt_to_dict(r: ImportedReceipt) -> dict:
@@ -308,6 +317,100 @@ def find_duplicate_candidates(
                 )
         out.sort(key=lambda g: g["count"], reverse=True)
         return out
+
+
+@mcp.tool()
+def find_cross_payment_duplicates(
+    company_id: int | None = None,
+    office_id: str | None = None,
+    date_window_days: int = 3,
+) -> dict:
+    """クレジットカード×現金など、決済手段をまたぐ二重計上の候補を検出する。
+
+    「カード明細の自動取込」と「領収書の現金手入力」で同じ支出が二重計上される
+    典型パターンを狙うチェック。金額が一致し、発生日の差が date_window_days 以内の
+    取引ペアを抽出する（取引先名の表記違いは不問）。決済手段が異なるペアを
+    cross_payment=true として最優先で返す。
+    """
+    from datetime import date as _date
+
+    def _parse(dstr):
+        try:
+            return _date.fromisoformat((dstr or "")[:10])
+        except ValueError:
+            return None
+
+    with SessionLocal() as s:
+        scope_key, _ = _resolve_scope(s, company_id, office_id)
+        q = s.query(ImportedDeal)
+        if scope_key:
+            q = q.filter(ImportedDeal.scope_key == scope_key)
+        rows = q.all()
+
+        by_amount: dict = {}
+        for d in rows:
+            if not d.amount:
+                continue
+            by_amount.setdefault((d.deal_type, d.amount), []).append(d)
+
+        pairs = []
+        skipped_groups = []
+        window = max(0, min(date_window_days, 31))
+        for (dtype, amount), items in by_amount.items():
+            if len(items) < 2:
+                continue
+            # 同額が多数ある場合（日次の送料・手数料等の反復取引）はペア列挙しない
+            if len(items) > 8:
+                skipped_groups.append(
+                    {"amount": amount, "count": len(items), "type": dtype}
+                )
+                continue
+            items = sorted(items, key=lambda x: x.issue_date or "")
+            for i in range(len(items)):
+                for j in range(i + 1, len(items)):
+                    a, b = items[i], items[j]
+                    da, db_ = _parse(a.issue_date), _parse(b.issue_date)
+                    if da is None or db_ is None:
+                        continue
+                    diff = abs((db_ - da).days)
+                    if diff > window:
+                        continue
+                    wa, wb = a.wallet_types, b.wallet_types
+                    cross = bool(wa and wb and set(wa) != set(wb))
+                    pairs.append(
+                        {
+                            "amount": amount,
+                            "type": dtype,
+                            "date_diff_days": diff,
+                            "cross_payment": cross,
+                            "deals": [
+                                {
+                                    "deal_id": x.deal_id,
+                                    "issue_date": x.issue_date,
+                                    "partner": x.partner_name,
+                                    "account_items": x.account_items,
+                                    "payment_methods": [
+                                        WALLET_LABELS.get(w, w) for w in x.wallet_types
+                                    ],
+                                    "has_receipt": x.has_receipt,
+                                }
+                                for x in (a, b)
+                            ],
+                        }
+                    )
+
+        # 決済手段が異なるペア → 日付差が小さい順
+        pairs.sort(key=lambda p: (not p["cross_payment"], p["date_diff_days"], -p["amount"]))
+        return {
+            "pairs": pairs[:50],
+            "pair_count": len(pairs),
+            "skipped_recurring_groups": skipped_groups,
+            "note": (
+                "cross_payment=true は決済手段（現金/カード等）が異なるペアで、"
+                "二重計上の可能性が最も高い。skipped_recurring_groups は同額多数の"
+                "反復取引（送料・手数料等）でペア列挙を省略したグループ。"
+            ),
+        }
 
 
 @mcp.tool()
@@ -666,6 +769,9 @@ def import_deals(
                 row.account_items = names or None
                 row.details_json = json.dumps(details, ensure_ascii=False)
                 row.receipt_ids = receipt_ids
+                row.payments_json = json.dumps(
+                    d.get("payments") or [], ensure_ascii=False
+                )
                 row.imported_at = datetime.utcnow()
             offset += 100
             if len(deals) < 100:

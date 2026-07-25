@@ -69,6 +69,26 @@ def build_check_prompts(
             ),
         },
         {
+            "key": "cross_payment",
+            "title": "クレカ×現金の二重計上チェック",
+            "check_type": "cross_payment",
+            "body": pre
+            + (
+                "\n【タスク】決済手段をまたぐ二重計上チェック（クレカ×現金など）\n"
+                "カード明細の自動取込と、領収書の現金手入力で同じ支出が二重計上される"
+                "パターンを検出します。\n"
+                "手順:\n"
+                "1. find_cross_payment_duplicates(company_id) を呼ぶ。金額一致・発生日±3日以内の"
+                "ペアが返り、決済手段が異なるペアは cross_payment=true が付く。\n"
+                "2. cross_payment=true のペアを最優先で、get_deal で両方の明細・科目・決済口座を確認し、"
+                "同一支出の二重計上か／偶然の同額別取引かを判断する。\n"
+                "3. ペアごとに両方の deal_id へ write_analysis(check_type=\"cross_payment\") で記録する。\n"
+                "   - 二重計上の疑いが強い → verdict=\"warning\"、相手方の deal_id と根拠を書く\n"
+                "   - 別取引と判断 → verdict=\"ok\"、理由を書く\n"
+                "4. skipped_recurring_groups（同額多数の反復取引）は対象外でよいが、気になる点があれば言及する。\n"
+            ),
+        },
+        {
             "key": "receipt_link",
             "title": "領収書・レシートの紐付けチェック",
             "check_type": "receipt_link",
