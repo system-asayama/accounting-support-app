@@ -38,6 +38,7 @@ from models import (
     Agent,
     Broadcast,
     BroadcastResult,
+    AiTask,
     BankDocument,
     BankDocumentReview,
     BankEntry,
@@ -1146,6 +1147,9 @@ def _register_routes(app: Flask) -> None:
             ("find_bank_unmatched", "通帳明細と帳簿の突合（記帳漏れ・帳簿のみを検出）"),
             ("write_analysis", "解析結果をアプリへ書き込む"),
             ("bulk_write_ok", "候補外の取引へ「問題なし」を一括記録（証跡用）"),
+            ("create_task", "freee側の修正・登録が必要な作業をToDoに提案（承認待ち）"),
+            ("list_tasks", "ToDo一覧（実行AIは承認済みのみ取得）"),
+            ("complete_task", "承認済みToDoの実行結果を報告"),
             ("list_analyses", "書き込まれた解析結果の一覧"),
             ("freee_get", "freeeの任意APIを読み取り（全情報）"),
             ("freee_list_paths", "freeeの読み取り可能なパス一覧"),
@@ -1695,6 +1699,58 @@ def _register_routes(app: Flask) -> None:
         db.session.commit()
         flash(f"通帳明細 {n} 件を削除しました。", "success")
         return redirect(url_for("bank", scope=scope))
+
+    # --- ToDo（AIへの作業指示・承認フロー） --------------------------------
+    @app.route("/tasks")
+    @login_required
+    def tasks():
+        """AIが提案した作業（ToDo）の承認・進捗管理。"""
+        rows = AiTask.query.order_by(AiTask.created_at.desc()).limit(300).all()
+        grouped = {"proposed": [], "approved": [], "done": [], "rejected": []}
+        for t in rows:
+            grouped.setdefault(t.status, []).append(t)
+        return render_template(
+            "tasks.html",
+            proposed=grouped["proposed"],
+            approved=grouped["approved"],
+            done=grouped["done"][:50],
+            rejected=grouped["rejected"][:50],
+        )
+
+    def _current_actor():
+        u = current_user()
+        return (u.username if u else "admin")[:80]
+
+    @app.route("/tasks/approve", methods=["POST"])
+    @login_required
+    def tasks_approve():
+        task_id = request.form.get("task_id", type=int)
+        approve_all = request.form.get("all") == "1"
+        q = AiTask.query.filter_by(status="proposed")
+        if not approve_all:
+            q = q.filter_by(id=task_id)
+        n = 0
+        for t in q.all():
+            t.status = "approved"
+            t.approved_by = _current_actor()
+            t.approved_at = datetime.utcnow()
+            n += 1
+        db.session.commit()
+        flash(f"{n} 件を承認しました（実行待ちになりました）。", "success" if n else "error")
+        return redirect(url_for("tasks"))
+
+    @app.route("/tasks/reject", methods=["POST"])
+    @login_required
+    def tasks_reject():
+        task_id = request.form.get("task_id", type=int)
+        t = db.session.get(AiTask, task_id) if task_id else None
+        if t is not None and t.status in ("proposed", "approved"):
+            t.status = "rejected"
+            t.approved_by = _current_actor()
+            t.approved_at = datetime.utcnow()
+            db.session.commit()
+            flash("却下しました。", "success")
+        return redirect(url_for("tasks"))
 
     # --- マネーフォワード クラウド会計 連携 --------------------------------
     @app.route("/mf")

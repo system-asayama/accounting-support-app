@@ -54,6 +54,15 @@ def _preamble(company_name: str, company_id, start_date: str, end_date: str) -> 
         "- ai_name にはあなたのモデル名（例: Claude / ChatGPT / Grok）を入れる\n"
         "- verdict は ok / warning / error のいずれか\n"
         "- result には判断根拠を日本語で簡潔に書く\n"
+        "\n"
+        "修正提案のルール: freee側の登録・修正・削除が必要だと判断した指摘は、\n"
+        "create_task で ToDo に提案すること（このツールで freee が変更されることはなく、\n"
+        "人間がToDoページで承認してから実行AIに渡る）。\n"
+        "- title: 一目で分かる要約（例: 7/15 支払手数料 ¥1,900 の重複を削除）\n"
+        "- instruction: 実行AIがそのまま作業できる具体的内容（日付・金額・取引先・科目・\n"
+        "  対象 deal_id・freeeでの操作）\n"
+        "- evidence: 根拠（どのチェックで何を検出したか）\n"
+        "- task_type: register_deal / fix_deal / delete_deal / link_receipt / other\n"
     )
 
 
@@ -172,6 +181,30 @@ def build_check_prompts(
                 "   only_with_receipt=True, result=\"証憑が紐付いているため問題なし\") を1回呼んで一括記録する。\n"
                 "4. list_receipts(company_id, only_unlinked=True) で未紐付けの証憑を確認し、\n"
                 "   どの取引に紐付けるべきかの候補を該当取引の result に書く。\n"
+            ),
+        },
+        {
+            "key": "execute_todo",
+            "title": "承認済みToDoの実行（freee接続AI用）",
+            "check_type": "todo",
+            "body": pre
+            + (
+                "\n【タスク】承認済みToDoの実行\n"
+                "前提: このアプリのMCP（accounting-support-app）に加えて、freeeへ書き込みできる\n"
+                "MCP（freee公式MCPなど）が接続されていること。無い場合はその旨報告して終了する。\n"
+                "手順:\n"
+                "1. list_tasks(status=\"approved\", company_id) で承認済み（実行待ち）のToDoを取得する。\n"
+                "   0件なら「実行待ちなし」と報告して終了。\n"
+                "2. 各タスクについて、実行前に instruction の対象（deal_id・日付・金額）を\n"
+                "   freee側で照会して確認する。instruction と実物が食い違う場合は実行せず、\n"
+                "   complete_task(task_id, ai_name, result=\"食い違いの内容\", success=false) で報告する。\n"
+                "3. 確認できたら freee側MCPのツールで登録・修正・削除を実行し、\n"
+                "   complete_task(task_id, ai_name, result=\"実行内容と結果（作成/変更した取引ID等）\", success=true)\n"
+                "   で完了報告する。\n"
+                "4. 最後に実行件数・失敗件数と要点をサマリーで報告する。\n"
+                "\n"
+                "厳守: status=\"proposed\"（承認待ち）のタスクは絶対に実行しない。\n"
+                "instruction に書かれていない追加の変更を行わない。\n"
             ),
         },
         {

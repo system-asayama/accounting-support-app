@@ -1,0 +1,107 @@
+{% extends "base.html" %}
+{% block title %}ToDo（AIへの作業指示）{% endblock %}
+{% block content %}
+<div class="card">
+  <h1>📋 ToDo（AIへの作業指示）</h1>
+  <p class="muted">
+    チェックAIが提案した freee側の修正・登録作業を、ここで<strong>承認</strong>してから実行AIに渡します。
+    承認していないタスクが実行されることはありません。
+  </p>
+  <p class="muted">
+    流れ: AIが提案（承認待ち）→ ここで承認（実行待ち）→ freee接続AIが
+    <a class="link" href="{{ url_for('prompts') }}">チェック手順</a>の「承認済みToDoの実行」プロンプトで実行 → 完了報告。
+  </p>
+</div>
+
+<div class="card">
+  <h1>承認待ち
+    {% if proposed %}<span class="badge error">{{ proposed | length }}件</span>{% endif %}
+  </h1>
+  {% if proposed %}
+  <form method="post" action="{{ url_for('tasks_approve') }}"
+        onsubmit="return confirm('承認待ちのタスクをすべて承認しますか？');" style="margin:0 0 8px;">
+    <input type="hidden" name="all" value="1">
+    <button type="submit" class="small">すべて承認</button>
+  </form>
+  {% for t in proposed %}
+  <details style="border-top:1px solid #eee; padding:8px 0;">
+    <summary style="cursor:pointer;">
+      <span class="badge user">{{ t.task_type_label }}</span>
+      <strong>{{ t.title }}</strong>
+      <span class="muted">{{ t.scope_name or '' }}・{{ t.created_by }} 提案</span>
+    </summary>
+    <p style="margin:8px 0 0; white-space:pre-wrap;">{{ t.instruction }}</p>
+    {% if t.evidence %}<p class="muted" style="margin:6px 0 0; white-space:pre-wrap;">根拠: {{ t.evidence }}</p>{% endif %}
+    {% if t.related_deal_id %}<p class="muted" style="margin:4px 0 0;">対象取引: #{{ t.related_deal_id }}</p>{% endif %}
+    <div class="inline" style="gap:8px; margin-top:10px;">
+      <form method="post" action="{{ url_for('tasks_approve') }}" style="margin:0;">
+        <input type="hidden" name="task_id" value="{{ t.id }}">
+        <button type="submit" class="small">✔ 承認</button>
+      </form>
+      <form method="post" action="{{ url_for('tasks_reject') }}" style="margin:0;">
+        <input type="hidden" name="task_id" value="{{ t.id }}">
+        <button type="submit" class="small danger">✖ 却下</button>
+      </form>
+    </div>
+  </details>
+  {% endfor %}
+  {% else %}
+  <p class="muted">承認待ちのタスクはありません。チェックAIが修正の必要を見つけると、ここに提案が届きます。</p>
+  {% endif %}
+</div>
+
+<div class="card">
+  <h1>実行待ち（承認済み）
+    {% if approved %}<span class="badge user">{{ approved | length }}件</span>{% endif %}
+  </h1>
+  {% if approved %}
+  <p class="muted">
+    freee公式MCPを接続したAIに「承認済みToDoの実行」プロンプト
+    （<a class="link" href="{{ url_for('prompts') }}">チェック手順</a>内）を貼ると実行されます。
+  </p>
+  {% for t in approved %}
+  <details style="border-top:1px solid #eee; padding:8px 0;">
+    <summary style="cursor:pointer;">
+      <span class="badge user">{{ t.task_type_label }}</span>
+      <strong>{{ t.title }}</strong>
+      <span class="muted">{{ t.scope_name or '' }}・{{ t.approved_by }} 承認</span>
+    </summary>
+    <p style="margin:8px 0 0; white-space:pre-wrap;">{{ t.instruction }}</p>
+    {% if t.result_note %}<p class="muted" style="margin:6px 0 0; white-space:pre-wrap;">経過: {{ t.result_note }}</p>{% endif %}
+    <form method="post" action="{{ url_for('tasks_reject') }}" style="margin-top:10px;">
+      <input type="hidden" name="task_id" value="{{ t.id }}">
+      <button type="submit" class="small danger">✖ 取り下げ</button>
+    </form>
+  </details>
+  {% endfor %}
+  {% else %}
+  <p class="muted">実行待ちのタスクはありません。</p>
+  {% endif %}
+</div>
+
+<div class="card">
+  <h1>完了 <span class="badge success">{{ done | length }}件</span></h1>
+  {% for t in done %}
+  <details style="border-top:1px solid #eee; padding:8px 0;">
+    <summary style="cursor:pointer;">
+      ✅ <strong>{{ t.title }}</strong>
+      <span class="muted">{{ t.scope_name or '' }}・{{ t.executed_by }} 実行
+        {% if t.executed_at %}（{{ t.executed_at.strftime('%m/%d %H:%M') }}）{% endif %}</span>
+    </summary>
+    <p style="margin:8px 0 0; white-space:pre-wrap;">{{ t.instruction }}</p>
+    {% if t.result_note %}<p class="muted" style="margin:6px 0 0; white-space:pre-wrap;">報告: {{ t.result_note }}</p>{% endif %}
+  </details>
+  {% else %}
+  <p class="muted">完了したタスクはまだありません。</p>
+  {% endfor %}
+
+  {% if rejected %}
+  <details style="margin-top:12px;">
+    <summary class="muted" style="cursor:pointer;">却下したタスク（{{ rejected | length }}件）</summary>
+    {% for t in rejected %}
+    <p class="muted" style="margin:8px 0 0;">✖ {{ t.title }}（{{ t.scope_name or '' }}）</p>
+    {% endfor %}
+  </details>
+  {% endif %}
+</div>
+{% endblock %}

@@ -25,6 +25,7 @@ from sqlalchemy.orm import sessionmaker
 from models import (
     SOURCE_FREEE,
     SOURCE_MF,
+    AiTask,
     BankDocument,
     BankDocumentReview,
     BankEntry,
@@ -782,6 +783,142 @@ def write_document_review(
         s.add(r)
         s.commit()
         return {"ok": True, "review_id": r.id, "document_id": d.id}
+
+
+@mcp.tool()
+def create_task(
+    ai_name: str,
+    title: str,
+    instruction: str,
+    task_type: str = "other",
+    evidence: str = "",
+    related_deal_id: int | None = None,
+    company_id: int | None = None,
+    office_id: str | None = None,
+) -> dict:
+    """freee側の修正・登録が必要な作業を ToDo として提案する（チェックAI用）。
+
+    提案されたタスクは「承認待ち」になり、アプリのToDoページで人間が承認してから
+    実行AIに渡る。このツールで freee が直接変更されることはない。
+    - title:       一目で分かる要約（例: 「7/15 支払手数料 ¥1,900 の重複を削除」）
+    - instruction: 実行AIがそのまま作業できる具体的内容
+                   （日付・金額・取引先・科目・対象 deal_id・freeeでの操作手順）
+    - task_type:   register_deal(登録) / fix_deal(修正) / delete_deal(削除) /
+                   link_receipt(証憑紐付け) / other
+    - evidence:    根拠（どのチェックで何を検出したか）
+    - 同じ事業所に同じ title の未処理タスクがあれば重複作成せずスキップする
+    """
+    ai_name = (ai_name or "").strip()
+    title = (title or "").strip()
+    instruction = (instruction or "").strip()
+    if not ai_name or not title or not instruction:
+        return {"ok": False, "error": "ai_name / title / instruction は必須です。"}
+    with SessionLocal() as s:
+        scope_key, source = _resolve_scope(s, company_id, office_id)
+        if not scope_key:
+            return {"ok": False, "error": "事業所が特定できません。company_id / office_id を指定してください。"}
+        dup = (
+            s.query(AiTask)
+            .filter(
+                AiTask.scope_key == scope_key,
+                AiTask.title == title[:255],
+                AiTask.status.in_(["proposed", "approved"]),
+            )
+            .first()
+        )
+        if dup is not None:
+            return {
+                "ok": True,
+                "task_id": dup.id,
+                "status": dup.status,
+                "note": "同じ内容の未処理タスクが既にあるため、新規作成せず既存タスクを返しました。",
+            }
+        scope_name = None
+        sample = (
+            s.query(ImportedDeal).filter(ImportedDeal.scope_key == scope_key).first()
+        )
+        if sample is not None:
+            scope_name = sample.scope_name
+        t = AiTask(
+            source=source,
+            scope_key=scope_key,
+            scope_name=scope_name,
+            company_id=company_id if company_id is not None else (sample.company_id if sample else None),
+            office_id=office_id,
+            task_type=(task_type or "other").strip()[:40] or "other",
+            title=title[:255],
+            instruction=instruction,
+            evidence=(evidence or "").strip() or None,
+            related_deal_id=related_deal_id,
+            created_by=ai_name[:80],
+            status="proposed",
+        )
+        s.add(t)
+        s.commit()
+        return {
+            "ok": True,
+            "task_id": t.id,
+            "status": "proposed",
+            "note": "承認待ちとして登録しました。人間がToDoページで承認すると実行AIに渡ります。",
+        }
+
+
+@mcp.tool()
+def list_tasks(
+    status: str = "approved",
+    company_id: int | None = None,
+    office_id: str | None = None,
+    limit: int = 50,
+) -> list[dict]:
+    """ToDoタスクの一覧を返す。
+
+    実行AIは status="approved"（人間が承認済み・実行待ち）だけを取得して作業すること。
+    status="proposed"（承認待ち）のタスクを実行してはならない。
+    status は proposed / approved / done / rejected / all。
+    """
+    with SessionLocal() as s:
+        scope_key, _ = _resolve_scope(s, company_id, office_id)
+        q = s.query(AiTask)
+        if scope_key:
+            q = q.filter(AiTask.scope_key == scope_key)
+        if status and status != "all":
+            q = q.filter(AiTask.status == status)
+        rows = q.order_by(AiTask.created_at).limit(max(1, min(limit, 200))).all()
+        return [t.to_dict() for t in rows]
+
+
+@mcp.tool()
+def complete_task(
+    task_id: int, ai_name: str, result: str, success: bool = True
+) -> dict:
+    """承認済みタスクの実行結果を報告する（実行AI用）。
+
+    - success=True:  タスクを「完了」にし、result に実行内容（freee側で何をどう
+                     登録・修正したか、作成された取引IDなど）を記録する
+    - success=False: タスクは「実行待ち」のまま、result に失敗理由を記録する
+    承認待ち（proposed）のタスクには使えない。
+    """
+    ai_name = (ai_name or "").strip()
+    result = (result or "").strip()
+    if not ai_name or not result:
+        return {"ok": False, "error": "ai_name と result は必須です。"}
+    with SessionLocal() as s:
+        t = s.get(AiTask, task_id)
+        if t is None:
+            return {"ok": False, "error": f"タスク {task_id} が見つかりません。"}
+        if t.status == "proposed":
+            return {"ok": False, "error": "このタスクはまだ人間の承認待ちです。実行しないでください。"}
+        if t.status in ("done", "rejected"):
+            return {"ok": False, "error": f"このタスクは既に {t.status} です。"}
+        stamp = datetime.utcnow().strftime("%Y-%m-%d %H:%M")
+        note = f"[{stamp} {ai_name}] {'完了' if success else '失敗'}: {result}"
+        t.result_note = (t.result_note + "\n" + note) if t.result_note else note
+        if success:
+            t.status = "done"
+            t.executed_by = ai_name[:80]
+            t.executed_at = datetime.utcnow()
+        s.commit()
+        return {"ok": True, "task_id": t.id, "status": t.status}
 
 
 @mcp.tool()

@@ -555,3 +555,77 @@ class BankDocumentReview(db.Model):
     verdict = db.Column(db.String(40), nullable=True)  # ok / warning / error
     result = db.Column(db.Text, nullable=False)
     created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
+
+
+TASK_TYPE_LABELS = {
+    "register_deal": "取引の登録",
+    "fix_deal": "取引の修正",
+    "delete_deal": "取引の削除",
+    "link_receipt": "証憑の紐付け",
+    "other": "その他",
+}
+
+# proposed(承認待ち) → approved(実行待ち) → done(完了) ／ rejected(却下)
+TASK_STATUSES = ("proposed", "approved", "done", "rejected")
+
+TASK_STATUS_LABELS = {
+    "proposed": "承認待ち",
+    "approved": "実行待ち",
+    "done": "完了",
+    "rejected": "却下",
+}
+
+
+class AiTask(db.Model):
+    """AIへの作業指示（ToDo）。チェックAIが提案し、人間が承認し、freee接続AIが実行する。
+
+    このアプリ自身は freee に書き込まない。承認済み（approved）のタスクだけを
+    実行AIが list_tasks で取得し、実行後 complete_task で報告する。
+    """
+
+    __tablename__ = "ai_tasks"
+
+    id = db.Column(db.Integer, primary_key=True)
+    source = db.Column(db.String(20), default=SOURCE_FREEE, nullable=False)
+    scope_key = db.Column(db.String(120), nullable=True, index=True)
+    scope_name = db.Column(db.String(255), nullable=True)
+    company_id = db.Column(db.BigInteger, nullable=True)
+    office_id = db.Column(db.String(80), nullable=True)
+    task_type = db.Column(db.String(40), default="other", nullable=False)
+    title = db.Column(db.String(255), nullable=False)
+    instruction = db.Column(db.Text, nullable=False)  # 実行AI向けの具体的な作業内容
+    evidence = db.Column(db.Text, nullable=True)  # 根拠（どのチェックで何を検出したか）
+    related_deal_id = db.Column(db.BigInteger, nullable=True)
+    created_by = db.Column(db.String(80), nullable=True)  # 提案者（AI名または人）
+    status = db.Column(db.String(20), default="proposed", nullable=False, index=True)
+    approved_by = db.Column(db.String(80), nullable=True)
+    approved_at = db.Column(db.DateTime, nullable=True)
+    executed_by = db.Column(db.String(80), nullable=True)
+    executed_at = db.Column(db.DateTime, nullable=True)
+    result_note = db.Column(db.Text, nullable=True)  # 実行AIの報告
+    created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
+
+    @property
+    def task_type_label(self) -> str:
+        return TASK_TYPE_LABELS.get(self.task_type or "", self.task_type or "")
+
+    @property
+    def status_label(self) -> str:
+        return TASK_STATUS_LABELS.get(self.status or "", self.status or "")
+
+    def to_dict(self) -> dict:
+        return {
+            "task_id": self.id,
+            "scope_name": self.scope_name,
+            "company_id": self.company_id,
+            "office_id": self.office_id,
+            "task_type": self.task_type,
+            "title": self.title,
+            "instruction": self.instruction,
+            "evidence": self.evidence,
+            "related_deal_id": self.related_deal_id,
+            "created_by": self.created_by,
+            "status": self.status,
+            "result_note": self.result_note,
+            "created_at": self.created_at.isoformat() if self.created_at else None,
+        }
