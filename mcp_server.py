@@ -18,13 +18,15 @@ import os
 from datetime import datetime, timedelta
 
 import requests
-from mcp.server.fastmcp import FastMCP
+from mcp.server.fastmcp import FastMCP, Image
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
 from models import (
     SOURCE_FREEE,
     SOURCE_MF,
+    BankDocument,
+    BankDocumentReview,
     BankEntry,
     DealAnalysis,
     FreeeConnection,
@@ -630,6 +632,156 @@ def find_bank_unmatched(
                 "ledger_only は各 deal_id へ write_analysis(check_type=\"bank\") で判定を記録する。"
             ),
         }
+
+
+@mcp.tool()
+def list_bank_documents(
+    company_id: int | None = None, office_id: str | None = None
+) -> list[dict]:
+    """データ化対象の原本（通帳・クレカ明細の画像）一覧を返す。
+
+    entries_count=0 の原本は未データ化。get_bank_document で画像を取得して読み取り、
+    write_bank_entries で明細を保存する。entries_count>0 の原本は書き起こし済みなので、
+    画像と保存済み明細を突き合わせて write_document_review で検証結果を記録する。
+    """
+    with SessionLocal() as s:
+        scope_key, _ = _resolve_scope(s, company_id, office_id)
+        q = s.query(BankDocument)
+        if scope_key:
+            q = q.filter(BankDocument.scope_key == scope_key)
+        docs = q.order_by(BankDocument.uploaded_at).all()
+        out = []
+        for d in docs:
+            cnt = (
+                s.query(BankEntry).filter(BankEntry.document_id == d.id).count()
+            )
+            reviews = (
+                s.query(BankDocumentReview)
+                .filter(BankDocumentReview.document_id == d.id)
+                .order_by(BankDocumentReview.created_at)
+                .all()
+            )
+            latest = {}
+            for r in reviews:
+                latest[r.ai_name] = {"verdict": r.verdict, "result": r.result[:200]}
+            out.append(
+                {
+                    "document_id": d.id,
+                    "doc_type": d.doc_type,
+                    "account_name": d.account_name,
+                    "filename": d.filename,
+                    "entries_count": cnt,
+                    "reviews": latest,
+                }
+            )
+        return out
+
+
+@mcp.tool()
+def get_bank_document(document_id: int) -> Image:
+    """原本（通帳・クレカ明細）の画像を返す。読み取って write_bank_entries で保存する。"""
+    with SessionLocal() as s:
+        d = s.get(BankDocument, document_id)
+        if d is None or not d.data:
+            raise ValueError(f"原本 {document_id} が見つかりません。")
+        fmt = {"image/jpeg": "jpeg", "image/png": "png", "image/webp": "webp", "image/gif": "gif"}.get(
+            d.content_type or "", "png"
+        )
+        return Image(data=d.data, format=fmt)
+
+
+@mcp.tool()
+def write_bank_entries(
+    document_id: int, ai_name: str, entries: list[dict]
+) -> dict:
+    """原本から読み取った明細を保存する（同じ原本の既存明細は入れ替え）。
+
+    entries の各要素: {"entry_date": "yyyy-mm-dd", "description": "摘要",
+                       "deposit": 入金額 or null, "withdrawal": 出金額 or null,
+                       "balance": 残高 or null}
+    入出金はどちらか一方に金額を入れる。行の並びは原本の記載順どおりにすること
+    （残高連続性チェックが並び順を前提にするため）。
+    返り値に balance_issues（残高連続性エラー）が含まれるので、エラーがあれば
+    画像の該当箇所を読み直し、修正版で再度このツールを呼ぶこと。
+    """
+    ai_name = (ai_name or "").strip()
+    if not ai_name:
+        return {"ok": False, "error": "ai_name は必須です。"}
+    if not entries:
+        return {"ok": False, "error": "entries が空です。"}
+    with SessionLocal() as s:
+        d = s.get(BankDocument, document_id)
+        if d is None:
+            return {"ok": False, "error": f"原本 {document_id} が見つかりません。"}
+        label = d.account_name or (d.filename or f"原本{d.id}")
+        label = f"{label}（AIデータ化）"[:120]
+        s.query(BankEntry).filter(BankEntry.document_id == d.id).delete()
+        saved = []
+        for row in entries:
+            if not isinstance(row, dict):
+                continue
+            dep = row.get("deposit")
+            wd = row.get("withdrawal")
+            if dep is None and wd is None:
+                continue
+            e = BankEntry(
+                source=d.source,
+                scope_key=d.scope_key,
+                scope_name=d.scope_name,
+                company_id=d.company_id,
+                office_id=d.office_id,
+                account_name=label,
+                entry_date=(str(row.get("entry_date") or "")[:20] or None),
+                description=(str(row.get("description") or "")[:255] or None),
+                deposit=int(dep) if dep is not None else None,
+                withdrawal=int(wd) if wd is not None else None,
+                balance=int(row["balance"]) if row.get("balance") is not None else None,
+                document_id=d.id,
+            )
+            s.add(e)
+            saved.append(e)
+        s.commit()
+        issues = check_balance_continuity(saved)
+        return {
+            "ok": True,
+            "document_id": d.id,
+            "saved": len(saved),
+            "balance_issues": issues[:50],
+            "note": (
+                "balance_issues が空なら読み取りは整合。エラーがあれば画像の該当箇所を読み直し、"
+                "修正した全行で再度 write_bank_entries を呼ぶ（入れ替え保存）。"
+                "検証が済んだら write_document_review で記録すること。"
+            ),
+        }
+
+
+@mcp.tool()
+def write_document_review(
+    document_id: int, ai_name: str, result: str, verdict: str = ""
+) -> dict:
+    """書き起こし済み明細への検証レビューを記録する（追記型・AIごとの相互チェック用）。
+
+    - 自分が書き起こした場合も、他AIの書き起こしを検証した場合も記録する
+    - verdict: ok（原本と一致）/ warning（軽微な相違・要確認）/ error（明確な誤り）
+    - result:  検証方法と相違点を日本語で具体的に（例: 3行目の出金 12,000 が画像では 12,800）
+    """
+    ai_name = (ai_name or "").strip()
+    result = (result or "").strip()
+    if not ai_name or not result:
+        return {"ok": False, "error": "ai_name と result は必須です。"}
+    with SessionLocal() as s:
+        d = s.get(BankDocument, document_id)
+        if d is None:
+            return {"ok": False, "error": f"原本 {document_id} が見つかりません。"}
+        r = BankDocumentReview(
+            document_id=d.id,
+            ai_name=ai_name[:80],
+            verdict=(verdict or "").strip()[:40] or None,
+            result=result,
+        )
+        s.add(r)
+        s.commit()
+        return {"ok": True, "review_id": r.id, "document_id": d.id}
 
 
 @mcp.tool()

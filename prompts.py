@@ -175,6 +175,34 @@ def build_check_prompts(
             ),
         },
         {
+            "key": "digitize",
+            "title": "通帳・クレカ明細のデータ化（画像読み取り＋相互検証）",
+            "check_type": "digitize",
+            "body": pre
+            + (
+                "\n【タスク】通帳・クレカ明細のデータ化（画像読み取り＋相互検証）\n"
+                "アプリにアップロードされた原本（画像）を読み取り、明細データに書き起こします。\n"
+                "手順:\n"
+                "1. list_bank_documents(company_id) で原本一覧を取得する。0件ならその旨報告して終了。\n"
+                "2. 各原本について:\n"
+                "   a. entries_count=0（未データ化）の場合 → get_bank_document(document_id) で画像を取得し、\n"
+                "      記載順どおりに全行を書き起こして write_bank_entries(document_id, ai_name, entries) で保存する。\n"
+                "      返ってくる balance_issues（残高連続性エラー）が空になるまで、画像を読み直して\n"
+                "      修正版で再保存する。最後に write_document_review で自己検証結果を記録する。\n"
+                "   b. entries_count>0（書き起こし済み）の場合 → get_bank_document で画像を取得し、\n"
+                "      list_bank_entries(company_id) の該当明細（document_id が一致する行）と1行ずつ突き合わせる。\n"
+                "      write_document_review(document_id, ai_name, verdict, result) で検証結果を記録する。\n"
+                "      - 完全一致 → verdict=\"ok\"\n"
+                "      - 相違あり → verdict=\"warning\" または \"error\"、どの行がどう違うか具体的に書く\n"
+                "3. 画像を読み取れない場合（対応していないAIの場合）は、その旨を報告し、\n"
+                "   残高連続性チェック（find_bank_unmatched の balance_issues）による数値検証だけ行う。\n"
+                "4. 最後に、原本ごとの行数・検証結果をサマリーで報告する。\n"
+                "\n"
+                "※ freeeへの明細登録はこのアプリでは行いません。検証済みの明細をfreeeに登録する場合は、\n"
+                "   freee公式MCPを接続したAIに「この明細を wallet_txns として登録して」と依頼してください。\n"
+            ),
+        },
+        {
             "key": "bank",
             "title": "通帳照合チェック",
             "check_type": "bank",

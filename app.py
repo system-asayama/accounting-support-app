@@ -38,6 +38,8 @@ from models import (
     Agent,
     Broadcast,
     BroadcastResult,
+    BankDocument,
+    BankDocumentReview,
     BankEntry,
     DealAnalysis,
     FreeeConnection,
@@ -114,6 +116,9 @@ def _ensure_schema() -> None:
     )
     additions.append(
         ("imported_deals", "payments_json", "ALTER TABLE imported_deals ADD COLUMN payments_json TEXT")
+    )
+    additions.append(
+        ("bank_entries", "document_id", "ALTER TABLE bank_entries ADD COLUMN document_id INTEGER")
     )
     # 画面から設定するアプリ情報（Client ID/Secret/リダイレクトURI）
     for tbl in ("freee_connections", "mf_connections"):
@@ -1133,6 +1138,10 @@ def _register_routes(app: Flask) -> None:
             ("list_receipts", "証憑（OCR結果）一覧・紐付け漏れ"),
             ("check_receipt_ocr", "取引とOCRの突合"),
             ("import_bank_txns", "freeeのデータ化結果（入出金明細）を取り込む"),
+            ("list_bank_documents", "データ化対象の原本（通帳・クレカ画像）一覧"),
+            ("get_bank_document", "原本の画像を取得（AIが読み取る）"),
+            ("write_bank_entries", "読み取った明細を保存（残高チェック付き）"),
+            ("write_document_review", "書き起こしへの検証レビューを記録"),
             ("list_bank_entries", "取り込んだ通帳明細の一覧"),
             ("find_bank_unmatched", "通帳明細と帳簿の突合（記帳漏れ・帳簿のみを検出）"),
             ("write_analysis", "解析結果をアプリへ書き込む"),
@@ -1409,6 +1418,35 @@ def _register_routes(app: Flask) -> None:
                 a["min"] = e.entry_date if a["min"] is None else min(a["min"], e.entry_date)
                 a["max"] = e.entry_date if a["max"] is None else max(a["max"], e.entry_date)
 
+        # データ化原本（画像）と各AIレビュー
+        docs = (
+            BankDocument.query.filter_by(scope_key=scope)
+            .order_by(BankDocument.uploaded_at.desc())
+            .all()
+        )
+        doc_ids = [d.id for d in docs]
+        entry_counts = {}
+        reviews_by_doc = {}
+        if doc_ids:
+            from sqlalchemy import func
+
+            for did, cnt in (
+                db.session.query(BankEntry.document_id, func.count(BankEntry.id))
+                .filter(BankEntry.document_id.in_(doc_ids))
+                .group_by(BankEntry.document_id)
+                .all()
+            ):
+                entry_counts[did] = cnt
+            for r in (
+                BankDocumentReview.query.filter(
+                    BankDocumentReview.document_id.in_(doc_ids)
+                )
+                .order_by(BankDocumentReview.created_at)
+                .all()
+            ):
+                # AIごとに最新レビューを残す
+                reviews_by_doc.setdefault(r.document_id, {})[r.ai_name] = r
+
         return render_template(
             "bank.html",
             scope=scope,
@@ -1421,7 +1459,70 @@ def _register_routes(app: Flask) -> None:
             ledger_only=ledger_only,
             balance_issues=balance_issues,
             is_freee_scope=scope.startswith("freee:"),
+            docs=docs,
+            entry_counts=entry_counts,
+            reviews_by_doc=reviews_by_doc,
         )
+
+    @app.route("/bank/docs/upload", methods=["POST"])
+    @login_required
+    def bank_docs_upload():
+        """データ化する原本（通帳・クレカ明細の画像）をアップロードする。"""
+        scope = (request.form.get("scope") or "").strip()
+        account_name = (request.form.get("account_name") or "").strip() or None
+        doc_type = (request.form.get("doc_type") or "bankbook").strip()
+        files = [f for f in request.files.getlist("images") if f and f.filename]
+        if not scope or not files:
+            flash("画像ファイルを選択してください。", "error")
+            return redirect(url_for("bank", scope=scope) if scope else url_for("bank"))
+
+        allowed = {"image/jpeg", "image/png", "image/webp", "image/gif"}
+        sample = ImportedDeal.query.filter_by(scope_key=scope).first()
+        saved, rejected = 0, []
+        for f in files:
+            data = f.read()
+            ctype = (f.content_type or "").split(";")[0].strip().lower()
+            if ctype not in allowed:
+                rejected.append(f"{f.filename}（画像ではありません）")
+                continue
+            if len(data) > 8 * 1024 * 1024:
+                rejected.append(f"{f.filename}（8MB超）")
+                continue
+            db.session.add(
+                BankDocument(
+                    source=(sample.source if sample else SOURCE_FREEE),
+                    scope_key=scope,
+                    scope_name=(sample.scope_name if sample else None),
+                    company_id=(sample.company_id if sample else None),
+                    office_id=(sample.office_id if sample else None),
+                    doc_type=doc_type if doc_type in ("bankbook", "credit_card") else "bankbook",
+                    account_name=account_name,
+                    filename=f.filename[:255],
+                    content_type=ctype,
+                    data=data,
+                )
+            )
+            saved += 1
+        db.session.commit()
+        msg = f"原本 {saved} 件をアップロードしました。チェック手順の「データ化」プロンプトをAIに貼ると読み取りが始まります。"
+        if rejected:
+            msg += " 対象外: " + "、".join(rejected)
+        flash(msg, "success" if saved else "error")
+        return redirect(url_for("bank", scope=scope))
+
+    @app.route("/bank/docs/delete", methods=["POST"])
+    @login_required
+    def bank_docs_delete():
+        doc_id = request.form.get("doc_id", type=int)
+        scope = (request.form.get("scope") or "").strip()
+        doc = db.session.get(BankDocument, doc_id) if doc_id else None
+        if doc is not None:
+            BankEntry.query.filter_by(document_id=doc.id).delete()
+            BankDocumentReview.query.filter_by(document_id=doc.id).delete()
+            db.session.delete(doc)
+            db.session.commit()
+            flash("原本と、その書き起こし明細・レビューを削除しました。", "success")
+        return redirect(url_for("bank", scope=scope) if scope else url_for("bank"))
 
     @app.route("/bank/import-freee", methods=["POST"])
     @login_required

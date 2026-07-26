@@ -415,6 +415,7 @@ class BankEntry(db.Model):
     deposit = db.Column(db.BigInteger, nullable=True)  # 入金
     withdrawal = db.Column(db.BigInteger, nullable=True)  # 出金
     balance = db.Column(db.BigInteger, nullable=True)  # 残高
+    document_id = db.Column(db.Integer, nullable=True, index=True)  # AIデータ化の元原本
     imported_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
 
     def to_dict(self) -> dict:
@@ -426,6 +427,7 @@ class BankEntry(db.Model):
             "deposit": self.deposit,
             "withdrawal": self.withdrawal,
             "balance": self.balance,
+            "document_id": self.document_id,
         }
 
 
@@ -511,3 +513,45 @@ def check_balance_continuity(entries):
                     )
             prev = r
     return issues
+
+
+class BankDocument(db.Model):
+    """データ化対象の原本（通帳・クレカ明細の画像）。
+
+    AIが MCP 経由で画像を読み、BankEntry へ書き起こす。書き起こし結果への
+    各AIのレビューは BankDocumentReview に記録する。
+    """
+
+    __tablename__ = "bank_documents"
+
+    id = db.Column(db.Integer, primary_key=True)
+    source = db.Column(db.String(20), default=SOURCE_FREEE, nullable=False)
+    scope_key = db.Column(db.String(120), nullable=True, index=True)
+    scope_name = db.Column(db.String(255), nullable=True)
+    company_id = db.Column(db.BigInteger, nullable=True)
+    office_id = db.Column(db.String(80), nullable=True)
+    doc_type = db.Column(db.String(20), default="bankbook", nullable=False)  # bankbook / credit_card
+    account_name = db.Column(db.String(120), nullable=True)
+    filename = db.Column(db.String(255), nullable=True)
+    content_type = db.Column(db.String(80), nullable=True)
+    data = db.Column(db.LargeBinary, nullable=True)  # 画像そのもの
+    uploaded_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
+
+    @property
+    def doc_type_label(self) -> str:
+        return {"bankbook": "通帳", "credit_card": "クレカ明細"}.get(
+            self.doc_type or "", self.doc_type or ""
+        )
+
+
+class BankDocumentReview(db.Model):
+    """書き起こし結果（BankEntry）に対する各AIの検証レビュー（追記型）。"""
+
+    __tablename__ = "bank_document_reviews"
+
+    id = db.Column(db.Integer, primary_key=True)
+    document_id = db.Column(db.Integer, nullable=False, index=True)
+    ai_name = db.Column(db.String(80), nullable=False)
+    verdict = db.Column(db.String(40), nullable=True)  # ok / warning / error
+    result = db.Column(db.Text, nullable=False)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)

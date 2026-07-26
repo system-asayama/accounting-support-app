@@ -49,6 +49,84 @@
   </form>
 </div>
 
+<div class="card">
+  <h1>📷 データ化（AIによる読み取り）</h1>
+  <p class="muted">
+    通帳・クレカ明細の<strong>画像</strong>をアップロードすると、MCP接続したAIが画像を読んで明細に書き起こし、
+    残高連続性チェックで自己検証したうえで、他のAIが読み合わせ（相互検証）します。
+    freeeへの登録はこのアプリでは行いません（freee公式MCPを接続したAIに依頼してください）。
+  </p>
+
+  <form method="post" action="{{ url_for('bank_docs_upload') }}" enctype="multipart/form-data">
+    <input type="hidden" name="scope" value="{{ scope }}">
+    <div class="row">
+      <div style="flex:1;">
+        <label for="doc_account">口座・カード名（任意）</label>
+        <input id="doc_account" name="account_name" placeholder="例: 〇〇銀行 普通">
+      </div>
+      <div style="flex:1;">
+        <label for="doc_type">種類</label>
+        <select id="doc_type" name="doc_type">
+          <option value="bankbook">通帳</option>
+          <option value="credit_card">クレカ明細</option>
+        </select>
+      </div>
+    </div>
+    <label for="images">画像ファイル（複数可・1枚8MBまで）</label>
+    <input id="images" name="images" type="file" accept="image/*" multiple>
+    <p class="muted" style="margin:6px 0 0;">
+      JPEG / PNG / WebP 対応。見開きページごとに撮影・スキャンした画像をアップロードしてください。
+    </p>
+    <button type="submit">アップロード</button>
+  </form>
+
+  {% if docs %}
+  <h3 style="margin-top:18px;">アップロード済みの原本</h3>
+  <div class="table-wrap">
+    <table>
+      <thead><tr><th>ID</th><th>種類</th><th>口座</th><th>ファイル</th><th>書き起こし</th><th>AI検証</th><th></th></tr></thead>
+      <tbody>
+        {% for doc in docs %}
+        <tr>
+          <td class="muted">#{{ doc.id }}</td>
+          <td><span class="badge user">{{ doc.doc_type_label }}</span></td>
+          <td class="wrap">{{ doc.account_name or '-' }}</td>
+          <td class="wrap muted">{{ doc.filename }}</td>
+          <td>
+            {% set cnt = entry_counts.get(doc.id, 0) %}
+            {% if cnt %}<span class="badge success">{{ cnt }}行</span>
+            {% else %}<span class="badge off">未</span>{% endif %}
+          </td>
+          <td class="wrap">
+            {% set revs = reviews_by_doc.get(doc.id, {}) %}
+            {% if revs %}
+              {% for ai, r in revs.items() %}
+                <span class="badge {% if r.verdict == 'ok' %}success{% elif r.verdict in ('warning','error') %}error{% else %}user{% endif %}"
+                      title="{{ r.result[:200] }}">{{ ai }}: {{ r.verdict or '記録' }}</span>
+              {% endfor %}
+            {% else %}<span class="muted">-</span>{% endif %}
+          </td>
+          <td>
+            <form method="post" action="{{ url_for('bank_docs_delete') }}"
+                  onsubmit="return confirm('原本と書き起こし・レビューを削除しますか？');" style="margin:0;">
+              <input type="hidden" name="scope" value="{{ scope }}">
+              <input type="hidden" name="doc_id" value="{{ doc.id }}">
+              <button type="submit" class="small danger">削除</button>
+            </form>
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  <p class="muted" style="margin-top:8px;">
+    アップロード後、<a class="link" href="{{ url_for('prompts') }}">チェック手順</a>の
+    「通帳・クレカ明細のデータ化」プロンプトを各AIに貼ってください。
+    1社目が書き起こし、2社目以降が画像と突き合わせて検証します（検証結果は上のAI検証列に表示）。
+  </p>
+  {% endif %}
+</div>
+
 {% if accounts %}
 <div class="card">
   <h1>取り込み済みの通帳明細 <span class="badge user">{{ entries_count }}件</span></h1>
