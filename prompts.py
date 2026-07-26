@@ -10,6 +10,7 @@ CHECK_TYPE_LABELS = {
     "cross_payment": "クレカ×現金の二重計上チェック",
     "receipt_link": "領収書・レシートの紐付けチェック",
     "ocr": "OCR読み取り結果チェック",
+    "bank": "通帳照合チェック",
     "general": "その他",
 }
 
@@ -101,7 +102,14 @@ def build_check_prompts(
                 "  - 全件を write_analysis で記録する（明確な不一致→error／軽微・要確認→warning／一致→ok。\n"
                 "    一致でも ok を記録して証跡を残す）。OCRチェックに bulk_write_ok は使わない。\n"
                 "\n"
-                "最後に、4項目それぞれの結果（記録した件数と warning/error の要点）を\n"
+                "■5. 通帳照合チェック（check_type=\"bank\"・通帳データ取込済みの場合のみ）\n"
+                "  - find_bank_unmatched(company_id) を呼ぶ。entries_count=0 ならスキップしてよい。\n"
+                "  - ledger_only（銀行口座決済なのに通帳に無い取引）を get_deal で確認し、\n"
+                "    write_analysis(check_type=\"bank\") で記録する（疑わしい→warning／理由があれば→ok）。\n"
+                "  - bank_only（通帳にあるが帳簿に無い明細＝記帳漏れ候補）は日付・金額・摘要を\n"
+                "    整理してサマリーで報告する。\n"
+                "\n"
+                "最後に、各項目の結果（記録した件数と warning/error の要点）を\n"
                 "日本語のサマリーとしてチャットにも報告すること。\n"
             ),
         },
@@ -162,6 +170,27 @@ def build_check_prompts(
                 "   only_with_receipt=True, result=\"証憑が紐付いているため問題なし\") を1回呼んで一括記録する。\n"
                 "4. list_receipts(company_id, only_unlinked=True) で未紐付けの証憑を確認し、\n"
                 "   どの取引に紐付けるべきかの候補を該当取引の result に書く。\n"
+            ),
+        },
+        {
+            "key": "bank",
+            "title": "通帳照合チェック",
+            "check_type": "bank",
+            "body": pre
+            + (
+                "\n【タスク】通帳照合チェック（通帳データ化サービスの結果と帳簿の突合）\n"
+                "アプリの「通帳照合」ページで取り込んだ通帳明細と、帳簿の取引を突合します。\n"
+                "手順:\n"
+                "1. find_bank_unmatched(company_id) を呼ぶ。金額一致・入出金の向き一致・日付±3日で\n"
+                "   機械照合された結果が返る。entries_count=0（通帳データ未取込）の場合は\n"
+                "   その旨を報告してこのチェックを終了する。\n"
+                "2. ledger_only（銀行口座決済なのに通帳に見当たらない取引）を get_deal で確認し、\n"
+                "   write_analysis(check_type=\"bank\") で記録する。\n"
+                "   - 二重計上・誤入力などの疑い → verdict=\"warning\"、根拠を書く\n"
+                "   - 対象期間外・別口座決済など説明が付く → verdict=\"ok\"、理由を書く\n"
+                "3. bank_only（通帳にあるが帳簿に見当たらない明細＝記帳漏れ候補）は、\n"
+                "   日付・金額・摘要を整理し、推定される勘定科目も添えてチャットで報告する。\n"
+                "4. 最後に、一致件数・不一致件数と要点をサマリーとして報告する。\n"
             ),
         },
         {

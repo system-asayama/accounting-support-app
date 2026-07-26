@@ -393,3 +393,86 @@ class MFConnection(db.Model):
             db.session.add(conn)
             db.session.commit()
         return conn
+
+
+class BankEntry(db.Model):
+    """通帳データ化サービス（CSV）から取り込んだ通帳明細1行。
+
+    帳簿（ImportedDeal）との照合に使う。入金は deposit、出金は withdrawal に入る。
+    """
+
+    __tablename__ = "bank_entries"
+
+    id = db.Column(db.Integer, primary_key=True)
+    source = db.Column(db.String(20), default=SOURCE_FREEE, nullable=False)
+    scope_key = db.Column(db.String(120), nullable=True, index=True)
+    scope_name = db.Column(db.String(255), nullable=True)
+    company_id = db.Column(db.BigInteger, nullable=True)
+    office_id = db.Column(db.String(80), nullable=True)
+    account_name = db.Column(db.String(120), nullable=True)  # 口座ラベル（例: 〇〇銀行 普通）
+    entry_date = db.Column(db.String(20), nullable=True)  # yyyy-mm-dd
+    description = db.Column(db.String(255), nullable=True)  # 摘要
+    deposit = db.Column(db.BigInteger, nullable=True)  # 入金
+    withdrawal = db.Column(db.BigInteger, nullable=True)  # 出金
+    balance = db.Column(db.BigInteger, nullable=True)  # 残高
+    imported_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
+
+    def to_dict(self) -> dict:
+        return {
+            "entry_id": self.id,
+            "account_name": self.account_name,
+            "entry_date": self.entry_date,
+            "description": self.description,
+            "deposit": self.deposit,
+            "withdrawal": self.withdrawal,
+            "balance": self.balance,
+        }
+
+
+def match_bank_entries(entries, deals, date_window_days: int = 3):
+    """通帳明細と取引を機械照合する。
+
+    金額一致・入出金の向き一致（入金=income / 出金=expense）・日付±date_window_days で
+    1対1に対応付ける（日付差が最小の取引を優先）。
+    返り値: (matched[(entry, deal)], bank_only[entry], ledger_only[deal])
+    ledger_only は「銀行口座で決済された取引のうち通帳に見当たらないもの」。
+    """
+    from datetime import datetime as _dt
+
+    def _parse(s):
+        try:
+            return _dt.strptime((s or "")[:10], "%Y-%m-%d").date()
+        except ValueError:
+            return None
+
+    matched, bank_only = [], []
+    used_deal_pks = set()
+    for e in sorted(entries, key=lambda x: x.entry_date or ""):
+        amount = e.deposit if e.deposit else e.withdrawal
+        dtype = "income" if e.deposit else "expense"
+        e_date = _parse(e.entry_date)
+        best = None
+        if amount:
+            for d in deals:
+                if d.id in used_deal_pks:
+                    continue
+                if (d.amount or 0) != amount or (d.deal_type or "") != dtype:
+                    continue
+                d_date = _parse(d.issue_date)
+                if e_date is None or d_date is None:
+                    continue
+                diff = abs((e_date - d_date).days)
+                if diff <= date_window_days and (best is None or diff < best[0]):
+                    best = (diff, d)
+        if best is not None:
+            used_deal_pks.add(best[1].id)
+            matched.append((e, best[1]))
+        else:
+            bank_only.append(e)
+
+    ledger_only = [
+        d
+        for d in deals
+        if d.id not in used_deal_pks and "bank_account" in (d.wallet_types or [])
+    ]
+    return matched, bank_only, ledger_only

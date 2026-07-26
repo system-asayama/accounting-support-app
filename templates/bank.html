@@ -1,0 +1,139 @@
+{% extends "base.html" %}
+{% block title %}通帳照合{% endblock %}
+{% block content %}
+<div class="card">
+  <h1>🏦 通帳照合</h1>
+  <p class="muted">
+    事業所: <strong>{{ scope_name }}</strong>
+    ・<a class="link" href="{{ url_for('bank', select=1) }}">別の事業所を選ぶ</a>
+  </p>
+  <p class="muted">
+    通帳データ化サービスが出力したCSVを取り込むと、帳簿（取り込み済みの取引 {{ deal_count }} 件）と
+    機械照合し、「通帳のみ（記帳漏れ候補）」「帳簿のみ（通帳にない計上）」を洗い出します。
+    照合ルール: 金額一致・入出金の向き一致・日付±3日。
+  </p>
+
+  <form method="post" action="{{ url_for('bank_upload') }}" enctype="multipart/form-data">
+    <input type="hidden" name="scope" value="{{ scope }}">
+    <label for="account_name">口座名（任意・例: 〇〇銀行 普通）</label>
+    <input id="account_name" name="account_name" placeholder="複数口座を分けて管理する場合に入力">
+    <label for="csv_file">通帳CSVファイル</label>
+    <input id="csv_file" name="csv_file" type="file" accept=".csv,text/csv">
+    <p class="muted" style="margin:6px 0 0;">
+      対応形式: 見出しに「日付」と「入金」「出金」（預入・支払等でも可）の列があるCSV。
+      摘要・残高の列は任意。文字コードは UTF-8 / Shift_JIS を自動判定します。
+      同じ口座名で再アップロードすると、その口座の明細は入れ替えになります。
+    </p>
+    <button type="submit">アップロードして照合</button>
+  </form>
+</div>
+
+{% if accounts %}
+<div class="card">
+  <h1>取り込み済みの通帳明細 <span class="badge user">{{ entries_count }}件</span></h1>
+  <div class="table-wrap">
+    <table>
+      <thead><tr><th>口座</th><th>件数</th><th>期間</th><th></th></tr></thead>
+      <tbody>
+        {% for name, a in accounts.items() %}
+        <tr>
+          <td class="wrap"><strong>{{ name }}</strong></td>
+          <td class="muted">{{ a.count }} 件</td>
+          <td class="muted">{{ a.min or '?' }} 〜 {{ a.max or '?' }}</td>
+          <td>
+            <form method="post" action="{{ url_for('bank_delete') }}"
+                  onsubmit="return confirm('この口座の通帳明細を削除しますか？');" style="margin:0;">
+              <input type="hidden" name="scope" value="{{ scope }}">
+              <input type="hidden" name="account_name" value="{{ name }}">
+              <button type="submit" class="small danger">削除</button>
+            </form>
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+
+<div class="card">
+  <h1>照合結果
+    <span class="badge success">一致 {{ matched | length }}件</span>
+    {% if bank_only %}<span class="badge error">通帳のみ {{ bank_only | length }}件</span>{% endif %}
+    {% if ledger_only %}<span class="badge error">帳簿のみ {{ ledger_only | length }}件</span>{% endif %}
+  </h1>
+
+  {% if bank_only %}
+  <h3>⚠️ 通帳のみ（帳簿に見当たらない＝記帳漏れ候補）</h3>
+  <div class="table-wrap">
+    <table>
+      <thead><tr><th>日付</th><th>摘要</th><th>入金</th><th>出金</th><th>口座</th></tr></thead>
+      <tbody>
+        {% for e in bank_only %}
+        <tr>
+          <td>{{ e.entry_date }}</td>
+          <td class="wrap">{{ e.description or '' }}</td>
+          <td>{% if e.deposit %}¥{{ '{:,}'.format(e.deposit) }}{% endif %}</td>
+          <td>{% if e.withdrawal %}¥{{ '{:,}'.format(e.withdrawal) }}{% endif %}</td>
+          <td class="muted">{{ e.account_name or '' }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% endif %}
+
+  {% if ledger_only %}
+  <h3>⚠️ 帳簿のみ（銀行口座決済なのに通帳に見当たらない）</h3>
+  <div class="table-wrap">
+    <table>
+      <thead><tr><th>日付</th><th>金額</th><th>取引先</th><th>科目</th><th>取引ID</th></tr></thead>
+      <tbody>
+        {% for d in ledger_only %}
+        <tr>
+          <td>{{ d.issue_date }}</td>
+          <td>¥{{ '{:,}'.format(d.amount or 0) }}</td>
+          <td class="wrap">{{ d.partner_name or '' }}</td>
+          <td class="muted wrap">{{ d.account_items or '' }}</td>
+          <td class="muted">#{{ d.deal_id }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% endif %}
+
+  {% if not bank_only and not ledger_only %}
+  <p class="muted">✅ 不一致はありません。通帳と帳簿は整合しています。</p>
+  {% endif %}
+
+  {% if matched %}
+  <details style="margin-top:12px;">
+    <summary class="muted" style="cursor:pointer;">一致した明細を表示（{{ matched | length }}件）</summary>
+    <div class="table-wrap" style="margin-top:8px;">
+      <table>
+        <thead><tr><th>通帳日付</th><th>摘要</th><th>金額</th><th>取引日付</th><th>取引先</th><th>取引ID</th></tr></thead>
+        <tbody>
+          {% for e, d in matched %}
+          <tr>
+            <td>{{ e.entry_date }}</td>
+            <td class="wrap">{{ e.description or '' }}</td>
+            <td>¥{{ '{:,}'.format((e.deposit or e.withdrawal) or 0) }}</td>
+            <td>{{ d.issue_date }}</td>
+            <td class="wrap muted">{{ d.partner_name or '' }}</td>
+            <td class="muted">#{{ d.deal_id }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </details>
+  {% endif %}
+
+  <p class="muted" style="margin-top:12px;">
+    AIに判断まで任せる場合は、<a class="link" href="{{ url_for('prompts') }}">チェック手順</a>の
+    「通帳照合チェック」プロンプトを使ってください。不一致の理由づけと記録
+    （<code>check_type="bank"</code>）まで実行され、<a class="link" href="{{ url_for('analyses') }}">解析比較</a>に表示されます。
+  </p>
+</div>
+{% endif %}
+{% endblock %}

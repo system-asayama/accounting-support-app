@@ -1,0 +1,38 @@
+{% extends "base.html" %}
+{% block title %}通帳照合 - 事業所を選択{% endblock %}
+{% block content %}
+<div class="card">
+  <h1>通帳照合 - 事業所（顧問先）を選択</h1>
+  <p class="muted">
+    通帳データ化サービスが出力したCSVを取り込み、帳簿（取り込み済みの取引）と突合します。
+    対象の事業所を選んでください。
+  </p>
+
+  {% if scopes %}
+  <div class="table-wrap">
+    <table>
+      <thead>
+        <tr><th>事業所</th><th>ソース</th><th>取引</th><th>通帳明細</th><th></th></tr>
+      </thead>
+      <tbody>
+        {% for s in scopes %}
+        <tr>
+          <td class="wrap"><strong>{{ s.name }}</strong></td>
+          <td><span class="badge {% if s.source == 'mf' %}admin{% else %}user{% endif %}">{{ s.source }}</span></td>
+          <td class="muted">{{ s.deal_count }} 件</td>
+          <td class="muted">{{ s.bank_count }} 件</td>
+          <td><a href="{{ url_for('bank', scope=s.key) }}"><button class="small" type="button">開く</button></a></td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% else %}
+  <p class="muted">
+    まだ取り込まれた取引データがありません。先に
+    <a class="link" href="{{ url_for('prompts') }}">チェック手順</a>のプロンプトなどで
+    対象事業所の取引を取り込んでください（通帳照合は取り込み済みの取引と突合します）。
+  </p>
+  {% endif %}
+</div>
+{% endblock %}

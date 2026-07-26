@@ -25,6 +25,7 @@ from sqlalchemy.orm import sessionmaker
 from models import (
     SOURCE_FREEE,
     SOURCE_MF,
+    BankEntry,
     DealAnalysis,
     FreeeConnection,
     ImportedDeal,
@@ -32,6 +33,7 @@ from models import (
     MFConnection,
     db,
     make_scope_key,
+    match_bank_entries,
 )
 
 
@@ -564,6 +566,63 @@ def list_receipts(
             receipts = [r for r in receipts if r.receipt_id not in linked]
 
         return [_receipt_to_dict(r) for r in receipts]
+
+
+@mcp.tool()
+def list_bank_entries(
+    company_id: int | None = None, office_id: str | None = None, limit: int = 300
+) -> list[dict]:
+    """通帳照合用。アプリに取り込まれた通帳明細（通帳データ化サービスのCSV由来）を返す。
+
+    明細が0件の場合、通帳データが未取込なので通帳照合チェックはスキップしてよい。
+    """
+    with SessionLocal() as s:
+        scope_key, _ = _resolve_scope(s, company_id, office_id)
+        q = s.query(BankEntry)
+        if scope_key:
+            q = q.filter(BankEntry.scope_key == scope_key)
+        rows = q.order_by(BankEntry.entry_date).limit(max(1, min(limit, 1000))).all()
+        return [e.to_dict() for e in rows]
+
+
+@mcp.tool()
+def find_bank_unmatched(
+    company_id: int | None = None,
+    office_id: str | None = None,
+    date_window_days: int = 3,
+) -> dict:
+    """通帳照合チェック用。通帳明細と取り込み済み取引を機械照合し、不一致を返す。
+
+    照合ルール: 金額一致・入出金の向き一致（入金=income / 出金=expense）・日付±date_window_days。
+    - bank_only:   通帳にあるが帳簿に見当たらない明細（記帳漏れ候補）
+    - ledger_only: 銀行口座決済なのに通帳に見当たらない取引（deal_id あり →
+                   write_analysis(check_type="bank") で判定を記録できる）
+    """
+    with SessionLocal() as s:
+        scope_key, _ = _resolve_scope(s, company_id, office_id)
+        if not scope_key:
+            return {"error": "事業所が特定できません。company_id / office_id を指定してください。"}
+        entries = (
+            s.query(BankEntry).filter(BankEntry.scope_key == scope_key).all()
+        )
+        if not entries:
+            return {
+                "entries_count": 0,
+                "note": "通帳明細が取り込まれていません。アプリの「通帳照合」ページでCSVを取り込むと照合できます。このチェックはスキップしてください。",
+            }
+        deals = (
+            s.query(ImportedDeal).filter(ImportedDeal.scope_key == scope_key).all()
+        )
+        matched, bank_only, ledger_only = match_bank_entries(
+            entries, deals, max(0, min(date_window_days, 14))
+        )
+        return {
+            "entries_count": len(entries),
+            "matched_count": len(matched),
+            "bank_only": [e.to_dict() for e in bank_only[:100]],
+            "ledger_only": [_deal_to_dict(d) for d in ledger_only[:100]],
+            "note": "bank_only は記帳漏れ候補（チャットで報告）。ledger_only は各 deal_id へ write_analysis(check_type=\"bank\") で判定を記録する。",
+        }
 
 
 @mcp.tool()

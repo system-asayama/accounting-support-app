@@ -38,6 +38,7 @@ from models import (
     Agent,
     Broadcast,
     BroadcastResult,
+    BankEntry,
     DealAnalysis,
     FreeeConnection,
     ImportedDeal,
@@ -46,6 +47,7 @@ from models import (
     User,
     db,
     make_scope_key,
+    match_bank_entries,
 )
 
 
@@ -181,6 +183,107 @@ def _backfill_scope_names() -> None:
         db.session.commit()
     except Exception:  # noqa: BLE001 - 補完失敗は起動を妨げない
         db.session.rollback()
+
+
+def _parse_bank_csv(data: bytes):
+    """通帳データ化サービスのCSVを解析して明細行のリストを返す。
+
+    見出し行を自動検出する。「日付」系の列と「入金」「出金」系の列が必要
+    （摘要・残高は任意）。文字コードは UTF-8 / Shift_JIS を自動判定。
+    返り値: (entries, skipped_rows)
+    """
+    import csv as _csv
+    import io as _io
+    import re as _re
+
+    text = None
+    for enc in ("utf-8-sig", "cp932", "utf-8"):
+        try:
+            text = data.decode(enc)
+            break
+        except UnicodeDecodeError:
+            continue
+    if text is None:
+        raise ValueError("文字コードを判定できません。UTF-8 か Shift_JIS のCSVを使ってください。")
+
+    rows = list(_csv.reader(_io.StringIO(text)))
+
+    DATE_KEYS = ("日付", "取引日", "年月日", "勘定日", "操作日", "取扱日", "date")
+    DESC_KEYS = ("摘要", "内容", "取引内容", "備考", "記事", "description")
+    IN_KEYS = ("入金", "預入", "お預入", "入金額", "貸方", "deposit")
+    OUT_KEYS = ("出金", "支払", "お支払", "引出", "お引出", "払出", "出金額", "借方", "withdrawal")
+    BAL_KEYS = ("残高", "差引残高", "balance")
+
+    def find_col(header, keys):
+        for i, cell in enumerate(header):
+            c = (cell or "").strip().replace(" ", "").replace("\u3000", "").lower()
+            if not c:
+                continue
+            for k in keys:
+                if k.lower() in c:
+                    return i
+        return None
+
+    header_idx = date_i = desc_i = in_i = out_i = bal_i = None
+    for idx, row in enumerate(rows[:10]):
+        di = find_col(row, DATE_KEYS)
+        ii = find_col(row, IN_KEYS)
+        oi = find_col(row, OUT_KEYS)
+        if di is not None and (ii is not None or oi is not None):
+            header_idx, date_i, in_i, out_i = idx, di, ii, oi
+            desc_i = find_col(row, DESC_KEYS)
+            bal_i = find_col(row, BAL_KEYS)
+            break
+    if header_idx is None:
+        raise ValueError(
+            "見出し行が見つかりません。CSVの先頭付近に「日付」と「入金」「出金」"
+            "（または預入・支払など）の列名がある形式にしてください。"
+        )
+
+    def to_amount(v):
+        v = (v or "").strip().replace(",", "").replace("¥", "").replace("円", "")
+        if not v or v in ("-", "－"):
+            return None
+        try:
+            n = int(float(v))
+        except ValueError:
+            return None
+        return abs(n) or None
+
+    def to_date(v):
+        v = (v or "").strip()
+        v = v.replace("/", "-").replace(".", "-").replace("年", "-").replace("月", "-").replace("日", "")
+        if _re.fullmatch(r"\d{8}", v):
+            v = f"{v[:4]}-{v[4:6]}-{v[6:]}"
+        m = _re.fullmatch(r"(\d{4})-(\d{1,2})-(\d{1,2})", v)
+        if not m:
+            return None
+        return f"{int(m.group(1)):04d}-{int(m.group(2)):02d}-{int(m.group(3)):02d}"
+
+    entries, skipped = [], 0
+    for row in rows[header_idx + 1 :]:
+        if not any((c or "").strip() for c in row):
+            continue
+
+        def get(i):
+            return row[i] if (i is not None and i < len(row)) else ""
+
+        d = to_date(get(date_i))
+        dep = to_amount(get(in_i)) if in_i is not None else None
+        wd = to_amount(get(out_i)) if out_i is not None else None
+        if d is None or (dep is None and wd is None):
+            skipped += 1
+            continue
+        entries.append(
+            {
+                "entry_date": d,
+                "description": (get(desc_i) or "").strip()[:255] or None,
+                "deposit": dep,
+                "withdrawal": wd,
+                "balance": to_amount(get(bal_i)) if bal_i is not None else None,
+            }
+        )
+    return entries, skipped
 
 
 def _seed_admin() -> None:
@@ -1028,6 +1131,8 @@ def _register_routes(app: Flask) -> None:
             ("list_deals_without_receipt", "証憑が無い取引"),
             ("list_receipts", "証憑（OCR結果）一覧・紐付け漏れ"),
             ("check_receipt_ocr", "取引とOCRの突合"),
+            ("list_bank_entries", "取り込んだ通帳明細の一覧"),
+            ("find_bank_unmatched", "通帳明細と帳簿の突合（記帳漏れ・帳簿のみを検出）"),
             ("write_analysis", "解析結果をアプリへ書き込む"),
             ("bulk_write_ok", "候補外の取引へ「問題なし」を一括記録（証跡用）"),
             ("list_analyses", "書き込まれた解析結果の一覧"),
@@ -1229,6 +1334,147 @@ def _register_routes(app: Flask) -> None:
             unanalyzed=unanalyzed,
             scopes=scopes,
         )
+
+    # --- 通帳照合（通帳データ化サービスのCSVと帳簿の突合） ------------------
+    def _bank_scopes():
+        """取り込み済み取引がある事業所一覧（通帳明細の件数付き）。"""
+        from sqlalchemy import func
+
+        rows = (
+            db.session.query(
+                ImportedDeal.scope_key,
+                func.max(ImportedDeal.scope_name),
+                func.max(ImportedDeal.source),
+                func.count(ImportedDeal.id),
+            )
+            .filter(ImportedDeal.scope_key.isnot(None))
+            .group_by(ImportedDeal.scope_key)
+            .all()
+        )
+        bank_counts = dict(
+            db.session.query(BankEntry.scope_key, func.count(BankEntry.id))
+            .group_by(BankEntry.scope_key)
+            .all()
+        )
+        scopes = [
+            {
+                "key": skey,
+                "name": snap or skey,
+                "source": src,
+                "deal_count": cnt,
+                "bank_count": bank_counts.get(skey, 0),
+            }
+            for skey, snap, src, cnt in rows
+        ]
+        scopes.sort(key=lambda x: x["name"] or "")
+        return scopes
+
+    @app.route("/bank")
+    @login_required
+    def bank():
+        """通帳照合。事業所を選び、通帳CSVの取込状況と機械照合の結果を表示する。"""
+        scope = (request.args.get("scope") or "").strip()
+        scopes = _bank_scopes()
+
+        if not scope:
+            if len(scopes) == 1 and not request.args.get("select"):
+                return redirect(url_for("bank", scope=scopes[0]["key"]))
+            return render_template("bank_select.html", scopes=scopes)
+
+        selected = next((s for s in scopes if s["key"] == scope), None)
+        deals = ImportedDeal.query.filter_by(scope_key=scope).all()
+        entries = (
+            BankEntry.query.filter_by(scope_key=scope)
+            .order_by(BankEntry.entry_date)
+            .all()
+        )
+
+        matched, bank_only, ledger_only = ([], [], [])
+        if entries:
+            matched, bank_only, ledger_only = match_bank_entries(entries, deals)
+            ledger_only.sort(key=lambda d: d.issue_date or "", reverse=True)
+
+        # 口座（account_name）ごとの取込サマリー
+        accounts = {}
+        for e in entries:
+            a = accounts.setdefault(
+                e.account_name or "（口座名なし）",
+                {"count": 0, "min": None, "max": None},
+            )
+            a["count"] += 1
+            if e.entry_date:
+                a["min"] = e.entry_date if a["min"] is None else min(a["min"], e.entry_date)
+                a["max"] = e.entry_date if a["max"] is None else max(a["max"], e.entry_date)
+
+        return render_template(
+            "bank.html",
+            scope=scope,
+            scope_name=(selected["name"] if selected else scope),
+            deal_count=len(deals),
+            entries_count=len(entries),
+            accounts=accounts,
+            matched=matched,
+            bank_only=bank_only,
+            ledger_only=ledger_only,
+        )
+
+    @app.route("/bank/upload", methods=["POST"])
+    @login_required
+    def bank_upload():
+        """通帳CSVを取り込む。同じ事業所×口座名の既存明細は入れ替える。"""
+        scope = (request.form.get("scope") or "").strip()
+        account_name = (request.form.get("account_name") or "").strip() or None
+        f = request.files.get("csv_file")
+        if not scope or f is None or not f.filename:
+            flash("CSVファイルを選択してください。", "error")
+            return redirect(url_for("bank", scope=scope) if scope else url_for("bank"))
+
+        try:
+            parsed, skipped = _parse_bank_csv(f.read())
+        except ValueError as e:
+            flash(str(e), "error")
+            return redirect(url_for("bank", scope=scope))
+        if not parsed:
+            flash("明細行を1件も読み取れませんでした。CSVの形式を確認してください。", "error")
+            return redirect(url_for("bank", scope=scope))
+
+        sample = ImportedDeal.query.filter_by(scope_key=scope).first()
+        # 同じ口座名の再アップロードは入れ替え（重複取込を防ぐ）
+        replaced = (
+            BankEntry.query.filter_by(scope_key=scope, account_name=account_name).delete()
+        )
+        for row in parsed:
+            db.session.add(
+                BankEntry(
+                    source=(sample.source if sample else SOURCE_FREEE),
+                    scope_key=scope,
+                    scope_name=(sample.scope_name if sample else None),
+                    company_id=(sample.company_id if sample else None),
+                    office_id=(sample.office_id if sample else None),
+                    account_name=account_name,
+                    **row,
+                )
+            )
+        db.session.commit()
+        msg = f"通帳明細 {len(parsed)} 件を取り込みました。"
+        if replaced:
+            msg += f"（同じ口座の旧データ {replaced} 件を入れ替え）"
+        if skipped:
+            msg += f"（読み取れなかった {skipped} 行はスキップ）"
+        flash(msg, "success")
+        return redirect(url_for("bank", scope=scope))
+
+    @app.route("/bank/delete", methods=["POST"])
+    @login_required
+    def bank_delete():
+        scope = (request.form.get("scope") or "").strip()
+        account_name = (request.form.get("account_name") or "").strip() or None
+        if account_name == "（口座名なし）":
+            account_name = None
+        n = BankEntry.query.filter_by(scope_key=scope, account_name=account_name).delete()
+        db.session.commit()
+        flash(f"通帳明細 {n} 件を削除しました。", "success")
+        return redirect(url_for("bank", scope=scope))
 
     # --- マネーフォワード クラウド会計 連携 --------------------------------
     @app.route("/mf")
