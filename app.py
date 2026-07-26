@@ -38,6 +38,7 @@ from models import (
     Agent,
     Broadcast,
     BroadcastResult,
+    AgentRun,
     AiTask,
     BankDocument,
     BankDocumentReview,
@@ -1699,6 +1700,77 @@ def _register_routes(app: Flask) -> None:
         db.session.commit()
         flash(f"通帳明細 {n} 件を削除しました。", "success")
         return redirect(url_for("bank", scope=scope))
+
+    # --- 自動巡回（CLI型AIエージェント） -----------------------------------
+    @app.route("/patrol")
+    @login_required
+    def agents_page():
+        """CLI型AI（Claude Code / Codex / Gemini CLI）の自動巡回設定と実行ログ。"""
+        import agent_runner
+
+        agents = []
+        for name, info in agent_runner.AGENTS.items():
+            cfg = agent_runner.agent_config(db.session, name)
+            runs = (
+                AgentRun.query.filter_by(agent=name)
+                .order_by(AgentRun.started_at.desc())
+                .limit(10)
+                .all()
+            )
+            agents.append(
+                {
+                    "name": name,
+                    "label": info["label"],
+                    "ai_name": info["ai_name"],
+                    "login_hint": info["login_hint"],
+                    "authed": agent_runner.is_authed(name),
+                    "enabled": cfg["enabled"],
+                    "interval_hours": cfg["interval_hours"],
+                    "runs": runs,
+                }
+            )
+        return render_template("patrol.html", agents=agents)
+
+    @app.route("/patrol/config", methods=["POST"])
+    @login_required
+    def agents_config():
+        import agent_runner
+
+        name = (request.form.get("agent") or "").strip()
+        if name not in agent_runner.AGENTS:
+            return redirect(url_for("agents_page"))
+        enabled = "1" if request.form.get("enabled") == "1" else "0"
+        interval = request.form.get("interval_hours", type=int) or 24
+        interval = max(1, min(interval, 168))
+        agent_runner.set_setting(db.session, f"agent.{name}.enabled", enabled)
+        agent_runner.set_setting(db.session, f"agent.{name}.interval_hours", str(interval))
+        flash(
+            f"{agent_runner.AGENTS[name]['label']} の自動巡回を"
+            f"{'有効（' + str(interval) + '時間ごと）' if enabled == '1' else '無効'}にしました。",
+            "success",
+        )
+        return redirect(url_for("agents_page"))
+
+    @app.route("/patrol/run/<name>", methods=["POST"])
+    @login_required
+    def agents_run(name):
+        import threading
+
+        import agent_runner
+
+        if name not in agent_runner.AGENTS:
+            return redirect(url_for("agents_page"))
+        if not agent_runner.is_authed(name):
+            flash(
+                f"未認証です。サーバーで初回ログインを済ませてください: {agent_runner.AGENTS[name]['login_hint']}",
+                "error",
+            )
+            return redirect(url_for("agents_page"))
+        threading.Thread(
+            target=agent_runner.run_agent, args=(name,), kwargs={"trigger": "manual"}, daemon=True
+        ).start()
+        flash("巡回を開始しました。数分後にこのページを再読み込みすると結果が表示されます。", "success")
+        return redirect(url_for("agents_page"))
 
     # --- ToDo（AIへの作業指示・承認フロー） --------------------------------
     @app.route("/tasks")

@@ -1,0 +1,84 @@
+{% extends "base.html" %}
+{% block title %}自動巡回（CLI型AI）{% endblock %}
+{% block content %}
+<div class="card">
+  <h1>🤖 自動巡回（CLI型AIエージェント）</h1>
+  <p class="muted">
+    サーバーに組み込んだ各社のCLI（<strong>定額プランの認証</strong>で動作）が、設定した間隔で自動的に
+    アプリを巡回し、未データ化原本の書き起こし・相互検証・他AIの指摘へのセカンドオピニオン・ToDo提案を行います。
+    結果は<a class="link" href="{{ url_for('analyses') }}">解析比較</a>・
+    <a class="link" href="{{ url_for('bank') }}">通帳照合</a>・
+    <a class="link" href="{{ url_for('tasks') }}">ToDo</a>に反映されます。
+  </p>
+  <p class="muted">
+    ⚠️ 各AIとも<strong>初回だけサーバーでのログイン認証</strong>が必要です（下の「未認証」欄のコマンドを
+    サーバーのターミナルで1回実行）。認証は保存され、以後は無人で動きます。
+  </p>
+</div>
+
+{% for a in agents %}
+<div class="card">
+  <h1>{{ a.label }}
+    {% if a.authed %}<span class="badge success">認証済み</span>
+    {% else %}<span class="badge error">未認証</span>{% endif %}
+    {% if a.enabled %}<span class="badge user">自動巡回 ON（{{ a.interval_hours }}時間ごと）</span>
+    {% else %}<span class="badge off">自動巡回 OFF</span>{% endif %}
+  </h1>
+
+  {% if not a.authed %}
+  <p class="muted">
+    初回ログイン（サーバーのターミナルで1回だけ実行し、表示されるURLをブラウザで開いて承認）:
+  </p>
+  <pre class="codebox">{{ a.login_hint }}</pre>
+  {% endif %}
+
+  <div class="inline" style="flex-wrap:wrap; gap:12px; align-items:flex-end;">
+    <form method="post" action="{{ url_for('agents_config') }}" style="margin:0;">
+      <input type="hidden" name="agent" value="{{ a.name }}">
+      <div class="inline" style="gap:10px; flex-wrap:wrap; align-items:center;">
+        <label style="margin:0; display:flex; align-items:center; gap:6px;">
+          <input type="checkbox" name="enabled" value="1" {% if a.enabled %}checked{% endif %}
+                 style="width:auto;"> 自動巡回を有効にする
+        </label>
+        <select name="interval_hours" style="width:auto;">
+          {% for h, lbl in [(1, '1時間ごと'), (6, '6時間ごと'), (12, '12時間ごと'), (24, '毎日'), (168, '毎週')] %}
+          <option value="{{ h }}" {% if a.interval_hours == h %}selected{% endif %}>{{ lbl }}</option>
+          {% endfor %}
+        </select>
+        <button type="submit" class="small">保存</button>
+      </div>
+    </form>
+    <form method="post" action="{{ url_for('agents_run', name=a.name) }}" style="margin:0;">
+      <button type="submit" class="small secondary" {% if not a.authed %}disabled{% endif %}>▶ 今すぐ巡回</button>
+    </form>
+  </div>
+
+  {% if a.runs %}
+  <h3 style="margin-top:16px;">実行ログ</h3>
+  {% for r in a.runs %}
+  <details style="border-top:1px solid #eee; padding:6px 0;">
+    <summary style="cursor:pointer;">
+      {% if r.status == 'success' %}✅{% elif r.status == 'running' %}⏳{% else %}❌{% endif %}
+      <span class="muted">{{ r.started_at.strftime('%m/%d %H:%M') }}</span>
+      <span class="badge {% if r.trigger == 'schedule' %}user{% else %}off{% endif %}">{{ '定期' if r.trigger == 'schedule' else '手動' }}</span>
+      {% if r.duration_seconds is not none %}<span class="muted">{{ r.duration_seconds }}秒</span>{% endif %}
+    </summary>
+    <pre style="white-space:pre-wrap; word-break:break-word; font-size:12px; background:#fbfcff; border:1px solid #eee; border-radius:8px; padding:10px; margin:8px 0 0;">{{ r.output or '(出力なし)' }}</pre>
+  </details>
+  {% endfor %}
+  {% else %}
+  <p class="muted" style="margin-top:12px;">まだ実行履歴はありません。</p>
+  {% endif %}
+</div>
+{% endfor %}
+
+<div class="card">
+  <h1>補足</h1>
+  <ul class="muted" style="padding-left:20px; margin:0;">
+    <li>Claude は Claude のサブスクリプション、ChatGPT（Codex CLI）は ChatGPT Plus、Gemini CLI は無料枠で動作します（API従量課金は使いません）</li>
+    <li>巡回は「差分だけ」処理します（未データ化の原本、自分のレビュー・判定が無いものだけ）。全部済んでいれば短時間で「変化なし」と報告して終わります</li>
+    <li>頻度を上げるほど各プランの利用枠を消費します。まずは「毎日」から始めるのがおすすめです</li>
+    <li>Grok はCLIが無いため、この仕組みの対象外です（Grok の Tasks 機能をご利用ください）</li>
+  </ul>
+</div>
+{% endblock %}

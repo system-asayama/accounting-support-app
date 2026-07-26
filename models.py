@@ -629,3 +629,23 @@ class AiTask(db.Model):
             "result_note": self.result_note,
             "created_at": self.created_at.isoformat() if self.created_at else None,
         }
+
+
+class AgentRun(db.Model):
+    """CLI型AIエージェント（自動巡回）の実行ログ。"""
+
+    __tablename__ = "agent_runs"
+
+    id = db.Column(db.Integer, primary_key=True)
+    agent = db.Column(db.String(20), nullable=False, index=True)  # claude / codex / gemini
+    trigger = db.Column(db.String(20), default="manual", nullable=False)  # manual / schedule
+    status = db.Column(db.String(20), default="running", nullable=False)  # running / success / error
+    output = db.Column(db.Text, nullable=True)  # 実行ログ（末尾）
+    started_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
+    finished_at = db.Column(db.DateTime, nullable=True)
+
+    @property
+    def duration_seconds(self):
+        if self.finished_at and self.started_at:
+            return int((self.finished_at - self.started_at).total_seconds())
+        return None

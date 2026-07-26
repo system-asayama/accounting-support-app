@@ -32,6 +32,8 @@ services:
       MCP_AUTH_TOKEN: ${MCP_AUTH_TOKEN:-}
       MCP_URL_SECRET: ${MCP_URL_SECRET:-}
       MCP_PUBLIC_URL: ${MCP_PUBLIC_URL:-}
+    volumes:
+      - agent_home:/root
     depends_on:
       - db
     restart: unless-stopped
@@ -50,6 +52,19 @@ services:
     depends_on:
       - db
     restart: unless-stopped
+  runner:
+    build: .
+    command: python agent_runner.py loop
+    environment:
+      DATABASE_URL: postgresql://app:app@db:5432/easy_login_system_app
+      MCP_AUTH_TOKEN: ${MCP_AUTH_TOKEN:-}
+      MCP_URL_SECRET: ${MCP_URL_SECRET:-}
+    volumes:
+      - agent_home:/root
+    depends_on:
+      - db
+      - mcp
+    restart: unless-stopped
   db:
     image: postgres:16-alpine
     environment:
@@ -61,3 +76,4 @@ services:
     restart: unless-stopped
 volumes:
   db_data:
+  agent_home:

@@ -89,6 +89,7 @@
         <a href="{{ url_for('analyses') }}">解析比較</a>
         <a href="{{ url_for('bank') }}">通帳照合</a>
         <a href="{{ url_for('tasks') }}">ToDo</a>
+        <a href="{{ url_for('agents_page') }}">自動巡回</a>
         {% if current_user.is_admin %}<a href="{{ url_for('admin_users') }}">ユーザー管理</a>{% endif %}
         {% if current_user.is_admin %}<a href="{{ url_for('admin_settings') }}">管理者設定</a>
         {% else %}<a href="{{ url_for('settings') }}">アカウント設定</a>{% endif %}
