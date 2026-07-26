@@ -46,6 +46,7 @@ from models import (
     MFConnection,
     User,
     db,
+    check_balance_continuity,
     make_scope_key,
     match_bank_entries,
 )
@@ -1131,6 +1132,7 @@ def _register_routes(app: Flask) -> None:
             ("list_deals_without_receipt", "証憑が無い取引"),
             ("list_receipts", "証憑（OCR結果）一覧・紐付け漏れ"),
             ("check_receipt_ocr", "取引とOCRの突合"),
+            ("import_bank_txns", "freeeのデータ化結果（入出金明細）を取り込む"),
             ("list_bank_entries", "取り込んだ通帳明細の一覧"),
             ("find_bank_unmatched", "通帳明細と帳簿の突合（記帳漏れ・帳簿のみを検出）"),
             ("write_analysis", "解析結果をアプリへ書き込む"),
@@ -1389,10 +1391,11 @@ def _register_routes(app: Flask) -> None:
             .all()
         )
 
-        matched, bank_only, ledger_only = ([], [], [])
+        matched, bank_only, ledger_only, balance_issues = ([], [], [], [])
         if entries:
             matched, bank_only, ledger_only = match_bank_entries(entries, deals)
             ledger_only.sort(key=lambda d: d.issue_date or "", reverse=True)
+            balance_issues = check_balance_continuity(entries)
 
         # 口座（account_name）ごとの取込サマリー
         accounts = {}
@@ -1416,7 +1419,94 @@ def _register_routes(app: Flask) -> None:
             matched=matched,
             bank_only=bank_only,
             ledger_only=ledger_only,
+            balance_issues=balance_issues,
+            is_freee_scope=scope.startswith("freee:"),
         )
+
+    @app.route("/bank/import-freee", methods=["POST"])
+    @login_required
+    def bank_import_freee():
+        """freee のデータ化結果（入出金明細 wallet_txns）を通帳明細として取り込む。"""
+        scope = (request.form.get("scope") or "").strip()
+        start_date = (request.form.get("start_date") or "").strip()
+        end_date = (request.form.get("end_date") or "").strip()
+        if not scope.startswith("freee:"):
+            flash("freeeの事業所を選択してください。", "error")
+            return redirect(url_for("bank"))
+        company_id = int(scope.split(":", 1)[1])
+
+        fc = FreeeConnection.get()
+        if not fc.is_connected:
+            flash("freeeと連携されていません。", "error")
+            return redirect(url_for("bank", scope=scope))
+
+        sample = ImportedDeal.query.filter_by(scope_key=scope).first()
+        total, account_count = 0, 0
+        try:
+            w = freee_client.api_get(fc, "/api/1/walletables", {"company_id": company_id})
+            accounts = [
+                x for x in w.get("walletables", []) if x.get("type") == "bank_account"
+            ]
+            if not accounts:
+                flash("freeeに銀行口座（口座・マスタ）が登録されていません。", "error")
+                return redirect(url_for("bank", scope=scope))
+
+            for acc in accounts:
+                label = f"{acc.get('name') or acc.get('id')}（freee明細）"
+                BankEntry.query.filter_by(scope_key=scope, account_name=label).delete()
+                offset = 0
+                imported_this = 0
+                while offset < 5000:
+                    params = {
+                        "company_id": company_id,
+                        "walletable_type": "bank_account",
+                        "walletable_id": acc["id"],
+                        "limit": 100,
+                        "offset": offset,
+                    }
+                    if start_date:
+                        params["start_date"] = start_date
+                    if end_date:
+                        params["end_date"] = end_date
+                    page = freee_client.api_get(fc, "/api/1/wallet_txns", params)
+                    txns = page.get("wallet_txns", [])
+                    if not txns:
+                        break
+                    for t in txns:
+                        side = t.get("entry_side")
+                        amount = t.get("amount")
+                        db.session.add(
+                            BankEntry(
+                                source=SOURCE_FREEE,
+                                scope_key=scope,
+                                scope_name=(sample.scope_name if sample else None),
+                                company_id=company_id,
+                                account_name=label,
+                                entry_date=t.get("date"),
+                                description=(t.get("description") or "")[:255] or None,
+                                deposit=amount if side == "income" else None,
+                                withdrawal=amount if side == "expense" else None,
+                                balance=t.get("balance"),
+                            )
+                        )
+                        total += 1
+                        imported_this += 1
+                    offset += 100
+                    if len(txns) < 100:
+                        break
+                if imported_this:
+                    account_count += 1
+        except freee_client.FreeeError as e:
+            db.session.rollback()
+            flash(f"freeeから明細を取得できませんでした: {e}", "error")
+            return redirect(url_for("bank", scope=scope))
+
+        db.session.commit()
+        flash(
+            f"freeeの入出金明細 {total} 件を取り込みました（口座 {account_count} 件・既存のfreee明細は入れ替え）。",
+            "success",
+        )
+        return redirect(url_for("bank", scope=scope))
 
     @app.route("/bank/upload", methods=["POST"])
     @login_required

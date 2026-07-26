@@ -476,3 +476,38 @@ def match_bank_entries(entries, deals, date_window_days: int = 3):
         if d.id not in used_deal_pks and "bank_account" in (d.wallet_types or [])
     ]
     return matched, bank_only, ledger_only
+
+
+def check_balance_continuity(entries):
+    """口座ごとに残高の連続性（前行残高±入出金額＝当行残高）を検査する。
+
+    通帳データ化の結果検証用。乱れがある行は「データ化の抜け・金額誤りの候補」。
+    残高が入っていない明細はスキップする。返り値: 乱れのリスト。
+    """
+    issues = []
+    by_account = {}
+    for e in entries:
+        by_account.setdefault(e.account_name or "", []).append(e)
+    for account, rows in by_account.items():
+        rows = [r for r in rows if r.balance is not None]
+        # 取込順（=CSV/明細の並び順）を同日内の順序として使う
+        rows.sort(key=lambda r: (r.entry_date or "", r.id or 0))
+        prev = None
+        for r in rows:
+            if prev is not None:
+                expected = (prev.balance or 0) + (r.deposit or 0) - (r.withdrawal or 0)
+                if expected != r.balance:
+                    issues.append(
+                        {
+                            "account_name": account or None,
+                            "entry_date": r.entry_date,
+                            "description": r.description,
+                            "deposit": r.deposit,
+                            "withdrawal": r.withdrawal,
+                            "expected_balance": expected,
+                            "actual_balance": r.balance,
+                            "difference": (r.balance or 0) - expected,
+                        }
+                    )
+            prev = r
+    return issues

@@ -32,6 +32,7 @@ from models import (
     ImportedReceipt,
     MFConnection,
     db,
+    check_balance_continuity,
     make_scope_key,
     match_bank_entries,
 )
@@ -616,12 +617,110 @@ def find_bank_unmatched(
         matched, bank_only, ledger_only = match_bank_entries(
             entries, deals, max(0, min(date_window_days, 14))
         )
+        balance_issues = check_balance_continuity(entries)
         return {
             "entries_count": len(entries),
             "matched_count": len(matched),
+            "balance_issues": balance_issues[:50],
             "bank_only": [e.to_dict() for e in bank_only[:100]],
             "ledger_only": [_deal_to_dict(d) for d in ledger_only[:100]],
-            "note": "bank_only は記帳漏れ候補（チャットで報告）。ledger_only は各 deal_id へ write_analysis(check_type=\"bank\") で判定を記録する。",
+            "note": (
+                "balance_issues は残高の連続性エラー（データ化の行抜け・読み誤り候補。原本との目視確認を促す）。"
+                "bank_only は記帳漏れ候補（チャットで報告）。"
+                "ledger_only は各 deal_id へ write_analysis(check_type=\"bank\") で判定を記録する。"
+            ),
+        }
+
+
+@mcp.tool()
+def import_bank_txns(
+    company_id: int, start_date: str = "", end_date: str = ""
+) -> dict:
+    """freee のデータ化結果（銀行口座の入出金明細 wallet_txns）を通帳明細として取り込む。
+
+    freee「データ化申込」で通帳をデータ化した結果は入出金明細としてfreeeに入るため、
+    これを取り込めば find_bank_unmatched で残高連続性チェックと帳簿突合ができる。
+    - start_date / end_date: 対象期間 (yyyy-mm-dd)。省略で全期間
+    - 同じ口座の既存freee明細は入れ替え（重複しない）
+    """
+    with SessionLocal() as s:
+        conn = s.get(FreeeConnection, 1)
+        if not conn or not conn.access_token:
+            return {"error": "freee と連携されていません。"}
+        scope_key = make_scope_key(SOURCE_FREEE, company_id=company_id)
+        sample = (
+            s.query(ImportedDeal).filter(ImportedDeal.scope_key == scope_key).first()
+        )
+
+        w = _freee_api(s, conn, "/api/1/walletables", {"company_id": company_id})
+        if "error" in w:
+            return w
+        accounts = [
+            x for x in w.get("walletables", []) if x.get("type") == "bank_account"
+        ]
+        if not accounts:
+            return {
+                "ok": False,
+                "error": "freeeに銀行口座（walletable）が登録されていません。",
+            }
+
+        total, imported_accounts = 0, []
+        for acc in accounts:
+            label = f"{acc.get('name') or acc.get('id')}（freee明細）"
+            s.query(BankEntry).filter(
+                BankEntry.scope_key == scope_key, BankEntry.account_name == label
+            ).delete()
+            offset = 0
+            imported_this = 0
+            while offset < 5000:
+                params = {
+                    "company_id": company_id,
+                    "walletable_type": "bank_account",
+                    "walletable_id": acc["id"],
+                    "limit": 100,
+                    "offset": offset,
+                }
+                if start_date:
+                    params["start_date"] = start_date
+                if end_date:
+                    params["end_date"] = end_date
+                page = _freee_api(s, conn, "/api/1/wallet_txns", params)
+                if "error" in page:
+                    return page
+                txns = page.get("wallet_txns", [])
+                if not txns:
+                    break
+                for t in txns:
+                    side = t.get("entry_side")
+                    amount = t.get("amount")
+                    s.add(
+                        BankEntry(
+                            source=SOURCE_FREEE,
+                            scope_key=scope_key,
+                            scope_name=(sample.scope_name if sample else None),
+                            company_id=company_id,
+                            account_name=label,
+                            entry_date=t.get("date"),
+                            description=(t.get("description") or "")[:255] or None,
+                            deposit=amount if side == "income" else None,
+                            withdrawal=amount if side == "expense" else None,
+                            balance=t.get("balance"),
+                        )
+                    )
+                    total += 1
+                    imported_this += 1
+                offset += 100
+                if len(txns) < 100:
+                    break
+            if imported_this:
+                imported_accounts.append({"account": label, "count": imported_this})
+        s.commit()
+        return {
+            "ok": True,
+            "company_id": company_id,
+            "entries_imported": total,
+            "accounts": imported_accounts,
+            "note": "続けて find_bank_unmatched で残高連続性チェックと帳簿突合を実行してください。",
         }
 
 

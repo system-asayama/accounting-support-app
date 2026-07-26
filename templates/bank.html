@@ -8,11 +8,32 @@
     ・<a class="link" href="{{ url_for('bank', select=1) }}">別の事業所を選ぶ</a>
   </p>
   <p class="muted">
-    通帳データ化サービスが出力したCSVを取り込むと、帳簿（取り込み済みの取引 {{ deal_count }} 件）と
-    機械照合し、「通帳のみ（記帳漏れ候補）」「帳簿のみ（通帳にない計上）」を洗い出します。
-    照合ルール: 金額一致・入出金の向き一致・日付±3日。
+    通帳データ化の結果（freeeの「データ化申込」で出来上がった入出金明細、または他社サービスのCSV）を
+    取り込み、次の2つを検証します。
   </p>
+  <ol class="steps" style="margin-top:0;">
+    <li><strong>残高の連続性チェック</strong> … 前行残高±入出金額＝当行残高になっているかを全行検査。
+      乱れがあれば、データ化の<strong>行の抜け・金額の読み誤り</strong>の候補です（元の通帳との目視確認ポイントを絞れます）</li>
+    <li><strong>帳簿との突合</strong> … 帳簿（取り込み済みの取引 {{ deal_count }} 件）と金額・入出金の向き・日付±3日で照合し、
+      「通帳のみ（記帳漏れ候補）」「帳簿のみ（通帳にない計上）」を洗い出します</li>
+  </ol>
 
+  {% if is_freee_scope %}
+  <form method="post" action="{{ url_for('bank_import_freee') }}" style="margin-bottom:8px;">
+    <input type="hidden" name="scope" value="{{ scope }}">
+    <label>① freeeからデータ化結果を取り込む（おすすめ）</label>
+    <p class="muted" style="margin:2px 0 6px;">
+      freeeの「データ化申込」で作成された<strong>入出金明細</strong>を、銀行口座ごとにAPIで直接取り込みます。CSVは不要です。
+    </p>
+    <div class="row" style="align-items:center;">
+      <input name="start_date" type="date" style="flex:1;" title="開始日（任意）">
+      <span class="muted">〜</span>
+      <input name="end_date" type="date" style="flex:1;" title="終了日（任意）">
+    </div>
+    <button type="submit">freeeの入出金明細を取り込んで照合</button>
+  </form>
+  <label style="margin-top:16px;">② CSVで取り込む（他社データ化サービスなど）</label>
+  {% endif %}
   <form method="post" action="{{ url_for('bank_upload') }}" enctype="multipart/form-data">
     <input type="hidden" name="scope" value="{{ scope }}">
     <label for="account_name">口座名（任意・例: 〇〇銀行 普通）</label>
@@ -57,10 +78,38 @@
 
 <div class="card">
   <h1>照合結果
+    {% if balance_issues %}<span class="badge error">🚨 残高エラー {{ balance_issues | length }}件</span>{% endif %}
     <span class="badge success">一致 {{ matched | length }}件</span>
     {% if bank_only %}<span class="badge error">通帳のみ {{ bank_only | length }}件</span>{% endif %}
     {% if ledger_only %}<span class="badge error">帳簿のみ {{ ledger_only | length }}件</span>{% endif %}
   </h1>
+
+  {% if balance_issues %}
+  <h3>🚨 残高の連続性エラー（データ化の抜け・読み誤りの候補 {{ balance_issues | length }}件）</h3>
+  <p class="muted" style="margin:4px 0 8px;">
+    前の行の残高±入出金額と、その行の残高が合いません。この行の<strong>直前に行の抜け</strong>があるか、
+    <strong>金額・残高の読み誤り</strong>の可能性があります。元の通帳の該当箇所を確認してください。
+  </p>
+  <div class="table-wrap">
+    <table>
+      <thead><tr><th>日付</th><th>摘要</th><th>入金</th><th>出金</th><th>計算上の残高</th><th>記載の残高</th><th>差額</th><th>口座</th></tr></thead>
+      <tbody>
+        {% for i in balance_issues %}
+        <tr>
+          <td>{{ i.entry_date }}</td>
+          <td class="wrap">{{ i.description or '' }}</td>
+          <td>{% if i.deposit %}¥{{ '{:,}'.format(i.deposit) }}{% endif %}</td>
+          <td>{% if i.withdrawal %}¥{{ '{:,}'.format(i.withdrawal) }}{% endif %}</td>
+          <td>¥{{ '{:,}'.format(i.expected_balance) }}</td>
+          <td>¥{{ '{:,}'.format(i.actual_balance) }}</td>
+          <td><strong>{{ '{:+,}'.format(i.difference) }}</strong></td>
+          <td class="muted">{{ i.account_name or '' }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% endif %}
 
   {% if bank_only %}
   <h3>⚠️ 通帳のみ（帳簿に見当たらない＝記帳漏れ候補）</h3>
@@ -102,8 +151,8 @@
   </div>
   {% endif %}
 
-  {% if not bank_only and not ledger_only %}
-  <p class="muted">✅ 不一致はありません。通帳と帳簿は整合しています。</p>
+  {% if not bank_only and not ledger_only and not balance_issues %}
+  <p class="muted">✅ 不一致はありません。残高の連続性も取れており、通帳と帳簿は整合しています。</p>
   {% endif %}
 
   {% if matched %}
