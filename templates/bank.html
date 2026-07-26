@@ -72,10 +72,11 @@
         </select>
       </div>
     </div>
-    <label for="images">画像ファイル（複数可・1枚8MBまで）</label>
-    <input id="images" name="images" type="file" accept="image/*" multiple>
+    <label for="images">画像・PDFファイル（複数可・画像8MB／PDF20MBまで）</label>
+    <input id="images" name="images" type="file" accept="image/*,.pdf,application/pdf" multiple>
     <p class="muted" style="margin:6px 0 0;">
-      JPEG / PNG / WebP 対応。見開きページごとに撮影・スキャンした画像をアップロードしてください。
+      JPEG / PNG / WebP / <strong>PDF</strong> 対応。PDFは1ページずつ画像に自動変換して保存します（1ファイル20ページまで）。
+      通帳は見開きページごとに撮影・スキャンしたものが読み取りやすいです。
     </p>
     <button type="submit">アップロード</button>
   </form>

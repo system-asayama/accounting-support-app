@@ -1478,16 +1478,8 @@ def _register_routes(app: Flask) -> None:
 
         allowed = {"image/jpeg", "image/png", "image/webp", "image/gif"}
         sample = ImportedDeal.query.filter_by(scope_key=scope).first()
-        saved, rejected = 0, []
-        for f in files:
-            data = f.read()
-            ctype = (f.content_type or "").split(";")[0].strip().lower()
-            if ctype not in allowed:
-                rejected.append(f"{f.filename}（画像ではありません）")
-                continue
-            if len(data) > 8 * 1024 * 1024:
-                rejected.append(f"{f.filename}（8MB超）")
-                continue
+
+        def add_doc(filename, ctype, data):
             db.session.add(
                 BankDocument(
                     source=(sample.source if sample else SOURCE_FREEE),
@@ -1497,11 +1489,48 @@ def _register_routes(app: Flask) -> None:
                     office_id=(sample.office_id if sample else None),
                     doc_type=doc_type if doc_type in ("bankbook", "credit_card") else "bankbook",
                     account_name=account_name,
-                    filename=f.filename[:255],
+                    filename=filename[:255],
                     content_type=ctype,
                     data=data,
                 )
             )
+
+        MAX_PDF_PAGES = 20
+        saved, rejected = 0, []
+        for f in files:
+            data = f.read()
+            ctype = (f.content_type or "").split(";")[0].strip().lower()
+            is_pdf = ctype == "application/pdf" or (f.filename or "").lower().endswith(".pdf")
+            if is_pdf:
+                # PDFはページごとに画像へ変換して保存（AIはMCP経由で画像として読む）
+                if len(data) > 20 * 1024 * 1024:
+                    rejected.append(f"{f.filename}（20MB超）")
+                    continue
+                try:
+                    import fitz  # PyMuPDF
+
+                    pdf = fitz.open(stream=data, filetype="pdf")
+                    if pdf.page_count > MAX_PDF_PAGES:
+                        rejected.append(
+                            f"{f.filename}（{pdf.page_count}ページ。1ファイル{MAX_PDF_PAGES}ページまで）"
+                        )
+                        pdf.close()
+                        continue
+                    for i, page in enumerate(pdf, start=1):
+                        pix = page.get_pixmap(matrix=fitz.Matrix(2.0, 2.0))
+                        add_doc(f"{f.filename} p{i}", "image/png", pix.tobytes("png"))
+                        saved += 1
+                    pdf.close()
+                except Exception:  # noqa: BLE001 - 壊れたPDF等
+                    rejected.append(f"{f.filename}（PDFを読み込めませんでした）")
+                continue
+            if ctype not in allowed:
+                rejected.append(f"{f.filename}（画像/PDFではありません）")
+                continue
+            if len(data) > 8 * 1024 * 1024:
+                rejected.append(f"{f.filename}（8MB超）")
+                continue
+            add_doc(f.filename, ctype, data)
             saved += 1
         db.session.commit()
         msg = f"原本 {saved} 件をアップロードしました。チェック手順の「データ化」プロンプトをAIに貼ると読み取りが始まります。"
